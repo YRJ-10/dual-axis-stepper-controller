@@ -1,0 +1,249 @@
+:root {
+  color-scheme: light;
+  --bg: #f4f6f8;
+  --panel: #ffffff;
+  --ink: #18212f;
+  --muted: #64748b;
+  --line: #d9e0e8;
+  --accent: #0f766e;
+  --accent-strong: #115e59;
+  --danger: #b42318;
+  --shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  min-height: 40px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 0 14px;
+  background: var(--accent);
+  color: #ffffff;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: var(--accent-strong);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.app-shell {
+  width: min(1180px, calc(100vw - 32px));
+  margin: 24px auto;
+}
+
+.topbar,
+.control-strip,
+.table-wrap,
+.log-panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-radius: 8px 8px 0 0;
+  padding: 18px 20px;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 24px;
+  line-height: 1.2;
+}
+
+h2 {
+  font-size: 16px;
+}
+
+#connectionStatus {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.actions,
+.control-strip {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.control-strip {
+  border-top: 0;
+  box-shadow: none;
+  padding: 14px 20px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+select,
+input {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 10px;
+  background: #ffffff;
+  color: var(--ink);
+}
+
+select {
+  min-width: 130px;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  border-top: 0;
+  box-shadow: none;
+}
+
+table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  border-top: 1px solid var(--line);
+  padding: 10px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+th {
+  background: #eef2f6;
+  color: #334155;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+td:first-child,
+th:first-child {
+  width: 72px;
+  text-align: center;
+}
+
+td:last-child,
+th:last-child {
+  width: 118px;
+}
+
+.mode-badge {
+  display: inline-grid;
+  width: 36px;
+  height: 32px;
+  place-items: center;
+  border-radius: 6px;
+  background: #e2e8f0;
+  font-weight: 700;
+}
+
+.row-action {
+  width: 96px;
+}
+
+.log-panel {
+  border-top: 0;
+  border-radius: 0 0 8px 8px;
+  box-shadow: none;
+}
+
+.log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid var(--line);
+  padding: 12px 20px;
+}
+
+#clearLogButton {
+  min-height: 34px;
+  background: #ffffff;
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+#clearLogButton:hover:not(:disabled) {
+  background: #eef2f6;
+}
+
+#logOutput {
+  height: 180px;
+  margin: 0;
+  overflow: auto;
+  border-top: 1px solid var(--line);
+  padding: 14px 20px;
+  background: #0b1220;
+  color: #c7f9cc;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.invalid {
+  border-color: var(--danger);
+}
+
+@media (max-width: 720px) {
+  .app-shell {
+    width: 100%;
+    margin: 0;
+  }
+
+  .topbar,
+  .control-strip,
+  .log-panel {
+    border-radius: 0;
+  }
+
+  .topbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .actions button,
+  .control-strip button,
+  .control-strip label {
+    flex: 1 1 150px;
+  }
+}

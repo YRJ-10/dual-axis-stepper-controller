@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dual Axis Stepper Tuner</title>
+    <link rel="stylesheet" href="./style.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="topbar" aria-label="Serial controls">
+        <div>
+          <h1>Dual Axis Stepper Tuner</h1>
+          <p id="connectionStatus">Belum terhubung</p>
+        </div>
+        <div class="actions">
+          <button id="connectButton" type="button">Connect</button>
+          <button id="disconnectButton" type="button" disabled>Disconnect</button>
+        </div>
+      </section>
+
+      <section class="control-strip" aria-label="Mode controls">
+        <label>
+          Mode Aktif
+          <select id="activeModeSelect"></select>
+        </label>
+        <button id="setModeButton" type="button" disabled>Set Mode</button>
+        <button id="readButton" type="button" disabled>Read Arduino</button>
+        <button id="saveButton" type="button" disabled>Save EEPROM</button>
+        <button id="loadButton" type="button" disabled>Load EEPROM</button>
+      </section>
+
+      <section class="table-wrap" aria-label="Mode table">
+        <table>
+          <thead>
+            <tr>
+              <th>Mode</th>
+              <th>Step Motor 1</th>
+              <th>Step Motor 2</th>
+              <th>Motor 2 x</th>
+              <th>Easing</th>
+              <th>Aksi</th>
+            </tr>
+          </thead>
+          <tbody id="modeTableBody"></tbody>
+        </table>
+      </section>
+
+      <section class="log-panel" aria-label="Serial log">
+        <div class="log-header">
+          <h2>Log</h2>
+          <button id="clearLogButton" type="button">Clear</button>
+        </div>
+        <pre id="logOutput"></pre>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
