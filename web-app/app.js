@@ -214,7 +214,6 @@ function flushIncomingLines() {
     if (parts[0] === "ACTIVE") {
       const mode = Number(parts[1]);
       if (Number.isInteger(mode) && mode >= 0 && mode < MODE_COUNT) {
-        activeModeSelect.value = String(mode);
         if (activeMode !== mode) {
           log(`< ${cleanLine}`);
         }
