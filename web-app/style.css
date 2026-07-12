@@ -71,6 +71,28 @@ button:disabled {
   padding: 18px 20px;
 }
 
+.active-display {
+  display: grid;
+  gap: 4px;
+  min-width: 160px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.active-display span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.active-display strong {
+  font-size: 28px;
+  line-height: 1;
+}
+
 h1,
 h2,
 p {
@@ -178,6 +200,11 @@ th:last-child {
   font-weight: 700;
 }
 
+tr.active-row .mode-badge {
+  background: var(--accent);
+  color: #ffffff;
+}
+
 .row-action {
   width: 96px;
 }
@@ -239,6 +266,10 @@ th:last-child {
   .topbar {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .active-display {
+    min-width: 0;
   }
 
   .actions button,

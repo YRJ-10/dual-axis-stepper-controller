@@ -18,6 +18,7 @@ const defaultModes = [
 const connectButton = document.querySelector("#connectButton");
 const disconnectButton = document.querySelector("#disconnectButton");
 const connectionStatus = document.querySelector("#connectionStatus");
+const currentActiveMode = document.querySelector("#currentActiveMode");
 const activeModeSelect = document.querySelector("#activeModeSelect");
 const setModeButton = document.querySelector("#setModeButton");
 const readButton = document.querySelector("#readButton");
@@ -32,6 +33,7 @@ let reader = null;
 let writer = null;
 let keepReading = false;
 let incomingBuffer = "";
+let activeMode = null;
 
 function buildUi() {
   for (let mode = 0; mode < MODE_COUNT; mode++) {
@@ -65,6 +67,9 @@ function setConnectedState(isConnected) {
     button.disabled = !isConnected;
   });
   connectionStatus.textContent = isConnected ? "Terhubung ke Arduino" : "Belum terhubung";
+  if (!isConnected) {
+    updateActiveMode(null);
+  }
 }
 
 function log(message) {
@@ -111,6 +116,14 @@ function updateRowFromModeLine(parts) {
   row.querySelector('[data-field="steps2"]').value = parts[3];
   row.querySelector('[data-field="multiplier2"]').value = parts[4];
   row.querySelector('[data-field="easing"]').value = parts[5];
+}
+
+function updateActiveMode(mode) {
+  activeMode = mode;
+  currentActiveMode.textContent = mode === null ? "-" : `Mode ${mode}`;
+  document.querySelectorAll("#modeTableBody tr").forEach((row) => {
+    row.classList.toggle("active-row", Number(row.dataset.mode) === mode);
+  });
 }
 
 async function connectSerial() {
@@ -195,6 +208,13 @@ function flushIncomingLines() {
     const parts = cleanLine.split(/\s+/);
     if (parts[0] === "MODE") {
       updateRowFromModeLine(parts);
+    }
+    if (parts[0] === "ACTIVE") {
+      const mode = Number(parts[1]);
+      if (Number.isInteger(mode) && mode >= 0 && mode < MODE_COUNT) {
+        activeModeSelect.value = String(mode);
+        updateActiveMode(mode);
+      }
     }
   });
 }

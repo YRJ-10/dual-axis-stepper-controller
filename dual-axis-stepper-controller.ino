@@ -99,6 +99,7 @@ void setup() {
 
   applyModeConfig(mode, true);
   tampilkanMode();
+  sendActiveMode();
 
   cli();
   TCCR1A = 0;
@@ -121,6 +122,7 @@ void handleButton() {
     applyModeConfig(mode, true);
     tampilkanMode();
     sendMode(mode);
+    sendActiveMode();
     delay(200);
   }
   lastButtonState = buttonState;
@@ -181,6 +183,7 @@ void processCommand(char *line) {
       sendMode(i);
     }
     Serial.println(F("OK DUMP"));
+    sendActiveMode();
     return;
   }
 
@@ -199,6 +202,7 @@ void processCommand(char *line) {
     tampilkanMode();
     Serial.println(F("OK LOAD"));
     sendMode(mode);
+    sendActiveMode();
     return;
   }
 
@@ -213,6 +217,7 @@ void processCommand(char *line) {
     applyModeConfig(mode, true);
     tampilkanMode();
     sendMode(mode);
+    sendActiveMode();
     return;
   }
 
@@ -259,6 +264,7 @@ void handleSetCommand() {
   if (targetMode == mode) {
     applyModeConfig(mode, true);
     tampilkanMode();
+    sendActiveMode();
   }
 
   Serial.print(F("OK SET "));
@@ -309,6 +315,11 @@ void sendMode(int targetMode) {
   Serial.print(config.multiplier2);
   Serial.print(F(" "));
   Serial.println(config.easing);
+}
+
+void sendActiveMode() {
+  Serial.print(F("ACTIVE "));
+  Serial.println(mode);
 }
 
 void saveConfigsToEeprom() {
