@@ -128,6 +128,30 @@ h2 {
   padding: 14px 20px;
 }
 
+.command-status {
+  min-height: 40px;
+  display: grid;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 12px;
+  color: var(--muted);
+  background: #f8fafc;
+  font-size: 14px;
+}
+
+.command-status.ok {
+  border-color: #86efac;
+  color: #166534;
+  background: #f0fdf4;
+}
+
+.command-status.error {
+  border-color: #fecaca;
+  color: #991b1b;
+  background: #fef2f2;
+}
+
 label {
   display: grid;
   gap: 6px;
@@ -209,6 +233,10 @@ tr.active-row .mode-badge {
   width: 96px;
 }
 
+.row-action.sent {
+  background: #16a34a;
+}
+
 .log-panel {
   border-top: 0;
   border-radius: 0 0 8px 8px;
@@ -273,6 +301,7 @@ tr.active-row .mode-badge {
   }
 
   .actions button,
+  .command-status,
   .control-strip button,
   .control-strip label {
     flex: 1 1 150px;

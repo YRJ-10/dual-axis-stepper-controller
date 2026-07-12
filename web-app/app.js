@@ -25,6 +25,7 @@ const readButton = document.querySelector("#readButton");
 const saveButton = document.querySelector("#saveButton");
 const loadButton = document.querySelector("#loadButton");
 const clearLogButton = document.querySelector("#clearLogButton");
+const commandStatus = document.querySelector("#commandStatus");
 const modeTableBody = document.querySelector("#modeTableBody");
 const logOutput = document.querySelector("#logOutput");
 
@@ -34,6 +35,7 @@ let writer = null;
 let keepReading = false;
 let incomingBuffer = "";
 let activeMode = null;
+let lastSentMode = null;
 
 function buildUi() {
   for (let mode = 0; mode < MODE_COUNT; mode++) {
@@ -78,6 +80,12 @@ function log(message) {
   logOutput.scrollTop = logOutput.scrollHeight;
 }
 
+function setCommandStatus(message, state = "") {
+  commandStatus.textContent = message;
+  commandStatus.classList.toggle("ok", state === "ok");
+  commandStatus.classList.toggle("error", state === "error");
+}
+
 function getRowValues(mode) {
   const row = modeTableBody.querySelector(`tr[data-mode="${mode}"]`);
   const values = {
@@ -116,6 +124,21 @@ function updateRowFromModeLine(parts) {
   row.querySelector('[data-field="steps2"]').value = parts[3];
   row.querySelector('[data-field="multiplier2"]').value = parts[4];
   row.querySelector('[data-field="easing"]').value = parts[5];
+}
+
+function markModeSent(mode) {
+  const button = modeTableBody.querySelector(`[data-apply="${mode}"]`);
+  if (!button) {
+    return;
+  }
+
+  const originalText = button.textContent;
+  button.textContent = "Sent";
+  button.classList.add("sent");
+  setTimeout(() => {
+    button.textContent = originalText;
+    button.classList.remove("sent");
+  }, 1200);
 }
 
 function updateActiveMode(mode) {
@@ -206,6 +229,32 @@ function flushIncomingLines() {
       return;
     }
     const parts = cleanLine.split(/\s+/);
+    if (parts[0] === "OK" && parts[1] === "SET") {
+      log(`< ${cleanLine}`);
+      const mode = Number(parts[2]);
+      if (Number.isInteger(mode)) {
+        setCommandStatus(`Mode ${mode} terkirim`, "ok");
+        markModeSent(mode);
+      } else {
+        setCommandStatus("Setting terkirim", "ok");
+      }
+      return;
+    }
+    if (parts[0] === "OK" && parts[1] === "SAVE") {
+      log(`< ${cleanLine}`);
+      setCommandStatus("EEPROM tersimpan", "ok");
+      return;
+    }
+    if (parts[0] === "OK" && parts[1] === "LOAD") {
+      log(`< ${cleanLine}`);
+      setCommandStatus("EEPROM dimuat", "ok");
+      return;
+    }
+    if (parts[0] === "ERR") {
+      log(`< ${cleanLine}`);
+      setCommandStatus(cleanLine, "error");
+      return;
+    }
     if (parts[0] === "MODE") {
       log(`< ${cleanLine}`);
       updateRowFromModeLine(parts);
@@ -243,6 +292,8 @@ async function sendCommand(command) {
 async function sendModeConfig(mode) {
   try {
     const values = getRowValues(mode);
+    lastSentMode = mode;
+    setCommandStatus(`Mengirim Mode ${mode}...`);
     await sendCommand(
       `SET ${mode} ${values.steps1} ${values.steps2} ${values.multiplier2} ${values.easing}`
     );
