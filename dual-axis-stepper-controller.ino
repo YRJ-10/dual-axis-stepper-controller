@@ -71,6 +71,7 @@ volatile bool dirState2 = HIGH;
 
 char serialBuffer[SERIAL_BUFFER_SIZE];
 byte serialIndex = 0;
+unsigned long lastActiveReportMs = 0;
 
 void setup() {
   pinMode(stepPin1, OUTPUT);
@@ -113,6 +114,7 @@ void loop() {
   handleSerial();
   handleButton();
   updateBaseSpeed();
+  reportActiveModePeriodically();
 }
 
 void handleButton() {
@@ -320,6 +322,15 @@ void sendMode(int targetMode) {
 void sendActiveMode() {
   Serial.print(F("ACTIVE "));
   Serial.println(mode);
+}
+
+void reportActiveModePeriodically() {
+  unsigned long now = millis();
+  if (now - lastActiveReportMs < 1000) {
+    return;
+  }
+  lastActiveReportMs = now;
+  sendActiveMode();
 }
 
 void saveConfigsToEeprom() {

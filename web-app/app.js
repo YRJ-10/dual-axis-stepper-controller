@@ -135,12 +135,13 @@ async function connectSerial() {
   try {
     port = await navigator.serial.requestPort();
     await port.open({ baudRate: BAUD_RATE });
+    await port.setSignals({ dataTerminalReady: true, requestToSend: true });
     writer = port.writable.getWriter();
     keepReading = true;
     readLoop();
     setConnectedState(true);
     log("Connected");
-    setTimeout(() => sendCommand("DUMP"), 1800);
+    setTimeout(() => sendCommand("DUMP"), 2500);
   } catch (error) {
     log(`Connect gagal: ${error.message}`);
   }
@@ -204,18 +205,24 @@ function flushIncomingLines() {
     if (!cleanLine) {
       return;
     }
-    log(`< ${cleanLine}`);
     const parts = cleanLine.split(/\s+/);
     if (parts[0] === "MODE") {
+      log(`< ${cleanLine}`);
       updateRowFromModeLine(parts);
+      return;
     }
     if (parts[0] === "ACTIVE") {
       const mode = Number(parts[1]);
       if (Number.isInteger(mode) && mode >= 0 && mode < MODE_COUNT) {
         activeModeSelect.value = String(mode);
+        if (activeMode !== mode) {
+          log(`< ${cleanLine}`);
+        }
         updateActiveMode(mode);
       }
+      return;
     }
+    log(`< ${cleanLine}`);
   });
 }
 
@@ -225,9 +232,13 @@ async function sendCommand(command) {
     return;
   }
 
-  const encoder = new TextEncoder();
-  await writer.write(encoder.encode(`${command}\n`));
-  log(`> ${command}`);
+  try {
+    const encoder = new TextEncoder();
+    await writer.write(encoder.encode(`${command}\n`));
+    log(`> ${command}`);
+  } catch (error) {
+    log(`Write error: ${error.message}`);
+  }
 }
 
 async function sendModeConfig(mode) {
