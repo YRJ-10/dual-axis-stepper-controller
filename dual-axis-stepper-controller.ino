@@ -3,20 +3,20 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <avr/interrupt.h>
-// Led
+// OLED
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_RESET -1
 #define SCREEN_ADDRESS 0x3C
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-// pin & button
-#define stepPin1 3
+// Pin motor & tombol
+#define stepPin1 5
 #define dirPin1 2
 #define stepPin2 9
 #define dirPin2 8
 #define potPin A0
 #define buttonPin 4
-// motor
+// Variabel motor
 int potValue = 0;
 int baseSpeed = 0;
 int threshold = 10;
@@ -26,8 +26,8 @@ bool buttonState;
 volatile int steps1 = 500, steps2 = 200;
 volatile int stepCount1 = 0, stepCount2 = 0;
 bool dirState1 = HIGH, dirState2 = HIGH;
-// multiplier motor 2
-volatile int speedMultiplier2 = 3; 
+// Multiplier percepatan motor 2
+volatile int speedMultiplier2 = 3; // <- bisa kamu ubah: 2, 5, 10, dst
 void setup() {
   pinMode(stepPin1, OUTPUT);
   pinMode(dirPin1, OUTPUT);
@@ -42,7 +42,7 @@ void setup() {
   tampilkanMode();
   cli();
   TCCR1A = 0;
-  TCCR1B = (1 << WGM12) | (1 << CS10); // ctc mode, prescaler 1
+  TCCR1B = (1 << WGM12) | (1 << CS10); // CTC mode, prescaler 1
   OCR1A = 500;
   TIMSK1 |= (1 << OCIE1A);
   sei();
@@ -64,12 +64,12 @@ ISR(TIMER1_COMPA_vect) {
   if (baseSpeed > 0) {
     int easingRange = 150;
     int effectiveSpeed1 = baseSpeed;
-    // easing motor 1
+    // Easing motor 1
     if (stepCount1 < easingRange)
       effectiveSpeed1 = map(stepCount1, 0, easingRange, baseSpeed / 4, baseSpeed);
     else if (stepCount1 > steps1 - easingRange)
       effectiveSpeed1 = map(steps1 - stepCount1, 0, easingRange, baseSpeed / 4, baseSpeed);
-    // motor 1 step
+    // Motor 1 step
     digitalWrite(stepPin1, HIGH);
     delayMicroseconds(2);
     digitalWrite(stepPin1, LOW);
@@ -79,19 +79,19 @@ ISR(TIMER1_COMPA_vect) {
       dirState1 = !dirState1;
       digitalWrite(dirPin1, dirState1);
     }
-    // motor 2 more step
+    // Motor 2 step lebih banyak
     int stepRepeat = speedMultiplier2;
     for (int i = 0; i < stepRepeat; i++) {
       digitalWrite(stepPin2, HIGH);
       delayMicroseconds(2);
       digitalWrite(stepPin2, LOW);
-      delayMicroseconds(2); // opsional delay per step
+      delayMicroseconds(2); // opsional delay antar step
       stepCount2++;
       if (stepCount2 >= steps2) {
         stepCount2 = 0;
         dirState2 = !dirState2;
         digitalWrite(dirPin2, dirState2);
-        break; // stop for
+        break; // berhenti supaya nggak lebih dari target
       }
     }
     // Update timer interval
