@@ -1,9 +1,7 @@
 # dual-axis-stepper-controller
 
-Dual-axis stepper motor controller for a V-rail rig:
+Dual-axis stepper motor controller with USB serial tuning:
 
-- Motor 1 moves the plate forward/backward on the rail.
-- Motor 2 rotates the standing wheel/round part back and forth.
 - Potentiometer controls global speed.
 - Button changes mode.
 - OLED shows the active mode and values.
@@ -17,8 +15,8 @@ Dual-axis stepper motor controller for a V-rail rig:
 
 Each mode has these values:
 
-- `Step Motor 1` - travel length for rail movement.
-- `Step Motor 2` - rotation length for wheel movement.
+- `Step Motor 1` - step count for motor 1.
+- `Step Motor 2` - step count for motor 2.
 - `Motor 2 x` - motor 2 speed multiplier.
 - `Easing` - slow-start/slow-end range for motor 1.
 
