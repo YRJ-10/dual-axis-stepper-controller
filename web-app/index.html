@@ -35,6 +35,22 @@
         <div id="commandStatus" class="command-status" role="status">Siap</div>
       </section>
 
+      <section id="speedPanel" class="speed-panel" aria-label="Speed control" tabindex="0">
+        <div class="speed-readout">
+          <span>Speed</span>
+          <strong id="speedValue">0</strong>
+          <small id="speedSource">Potensio</small>
+        </div>
+        <input id="speedSlider" type="range" min="0" max="100" step="1" value="0">
+        <div class="speed-actions">
+          <button id="speedDownButton" type="button">-</button>
+          <button id="setSpeedButton" type="button">Set Speed</button>
+          <button id="speedUpButton" type="button">+</button>
+          <button id="stopButton" type="button">STOP</button>
+          <button id="potButton" type="button">Potensio</button>
+        </div>
+      </section>
+
       <section class="table-wrap" aria-label="Mode table">
         <table>
           <thead>
@@ -43,7 +59,8 @@
               <th>Step Motor 1</th>
               <th>Step Motor 2</th>
               <th>Motor 2 x</th>
-              <th>Easing</th>
+              <th>Easing M1</th>
+              <th>Easing M2</th>
               <th>Aksi</th>
             </tr>
           </thead>
@@ -60,6 +77,6 @@
       </section>
     </main>
 
-    <script src="./app.js"></script>
+    <script src="./app.js?v=20260715-easing2b"></script>
   </body>
 </html>

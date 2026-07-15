@@ -22,13 +22,31 @@
 #define MODE_COUNT 11
 #define SERIAL_BUFFER_SIZE 64
 #define EEPROM_MAGIC 0x44584331UL
-#define EEPROM_VERSION 1
+#define EEPROM_VERSION 2
+#define OLED_RETRY_INTERVAL_MS 2000
+#define OLED_REFRESH_INTERVAL_MS 1000
+#define OLED_REINIT_INTERVAL_MS 5000
+#define SPEED_RAMP_STEP 5
 
 struct ModeConfig {
   int steps1;
   int steps2;
   int multiplier2;
   int easing;
+  int easing2;
+};
+
+struct ModeConfigV1 {
+  int steps1;
+  int steps2;
+  int multiplier2;
+  int easing;
+};
+
+struct StoredConfigV1 {
+  unsigned long magic;
+  byte version;
+  ModeConfigV1 modes[MODE_COUNT];
 };
 
 struct StoredConfig {
@@ -40,17 +58,17 @@ struct StoredConfig {
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 ModeConfig modeConfigs[MODE_COUNT] = {
-  {1000, 2000, 3, 150},
-  {1500, 2300, 3, 150},
-  {2000, 2500, 3, 150},
-  {2300, 2700, 3, 150},
-  {2500, 3000, 3, 150},
-  {800, 4000, 3, 150},
-  {1500, 4300, 3, 150},
-  {2000, 4500, 3, 150},
-  {2300, 4000, 3, 150},
-  {2700, 0, 3, 150},
-  {3000, 0, 3, 150}
+  {1000, 2000, 3, 150, 150},
+  {1500, 2300, 3, 150, 150},
+  {2000, 2500, 3, 150, 150},
+  {2300, 2700, 3, 150, 150},
+  {2500, 3000, 3, 150, 150},
+  {800, 4000, 3, 150, 150},
+  {1500, 4300, 3, 150, 150},
+  {2000, 4500, 3, 150, 150},
+  {2300, 4000, 3, 150, 150},
+  {2700, 0, 3, 150, 150},
+  {3000, 0, 3, 150, 150}
 };
 
 int potValue = 0;
@@ -58,12 +76,18 @@ const int threshold = 10;
 int mode = 0;
 bool lastButtonState = HIGH;
 bool displayReady = false;
+bool webSpeedEnabled = false;
+int webTargetSpeed = 0;
+unsigned long lastDisplayRetryMs = 0;
+unsigned long lastDisplayRefreshMs = 0;
+unsigned long lastDisplayReinitMs = 0;
 
 volatile int baseSpeed = 0;
 volatile int activeSteps1 = 1000;
 volatile int activeSteps2 = 2000;
 volatile int activeMultiplier2 = 3;
 volatile int activeEasing = 150;
+volatile int activeEasing2 = 150;
 volatile int stepCount1 = 0;
 volatile int stepCount2 = 0;
 volatile bool dirState1 = HIGH;
@@ -85,12 +109,9 @@ void setup() {
 
   Serial.begin(9600);
   Serial.println(F("Dual axis controller ready"));
-  Serial.println(F("Commands: SET mode steps1 steps2 multiplier2 easing | GET mode | DUMP | SAVE | LOAD"));
+  Serial.println(F("Commands: SET mode steps1 steps2 multiplier2 easing1 easing2 | GET mode | DUMP | SAVE | LOAD | MODE mode | SPEED value | POT | STOP"));
 
-  displayReady = display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS);
-  if (!displayReady) {
-    Serial.println(F("OLED init failed, controller continues"));
-  }
+  tryInitDisplay();
 
   if (loadConfigsFromEeprom()) {
     Serial.println(F("OK EEPROM loaded"));
@@ -101,6 +122,7 @@ void setup() {
   applyModeConfig(mode, true);
   tampilkanMode();
   sendActiveMode();
+  sendSpeedStatus();
 
   cli();
   TCCR1A = 0;
@@ -114,6 +136,7 @@ void loop() {
   handleSerial();
   handleButton();
   updateBaseSpeed();
+  maintainDisplay();
   reportActiveModePeriodically();
 }
 
@@ -131,6 +154,23 @@ void handleButton() {
 }
 
 void updateBaseSpeed() {
+  if (webSpeedEnabled) {
+    int nextSpeed = baseSpeed;
+    if (nextSpeed < webTargetSpeed) {
+      nextSpeed += SPEED_RAMP_STEP;
+      if (nextSpeed > webTargetSpeed) {
+        nextSpeed = webTargetSpeed;
+      }
+    } else if (nextSpeed > webTargetSpeed) {
+      nextSpeed -= SPEED_RAMP_STEP;
+      if (nextSpeed < webTargetSpeed) {
+        nextSpeed = webTargetSpeed;
+      }
+    }
+    baseSpeed = nextSpeed;
+    return;
+  }
+
   potValue = analogRead(potPin);
   int nextSpeed = map(potValue, 0, 1023, 500, 5000);
   if (potValue < threshold) {
@@ -186,6 +226,7 @@ void processCommand(char *line) {
     }
     Serial.println(F("OK DUMP"));
     sendActiveMode();
+    sendSpeedStatus();
     return;
   }
 
@@ -223,7 +264,48 @@ void processCommand(char *line) {
     return;
   }
 
+  if (strcmp(cmd, "SPEED") == 0) {
+    handleSpeedCommand();
+    return;
+  }
+
+  if (strcmp(cmd, "POT") == 0) {
+    webSpeedEnabled = false;
+    Serial.println(F("OK POT"));
+    sendSpeedStatus();
+    return;
+  }
+
+  if (strcmp(cmd, "STOP") == 0) {
+    webSpeedEnabled = true;
+    webTargetSpeed = 0;
+    baseSpeed = 0;
+    Serial.println(F("OK STOP"));
+    sendSpeedStatus();
+    return;
+  }
+
   Serial.println(F("ERR command"));
+}
+
+void handleSpeedCommand() {
+  char *speedToken = strtok(NULL, " ");
+  if (speedToken == NULL) {
+    Serial.println(F("ERR SPEED format"));
+    return;
+  }
+
+  int nextSpeedPercent = atoi(speedToken);
+  if (nextSpeedPercent < 0 || nextSpeedPercent > 100) {
+    Serial.println(F("ERR SPEED value"));
+    return;
+  }
+
+  webSpeedEnabled = true;
+  webTargetSpeed = nextSpeedPercent * 50;
+  Serial.print(F("OK SPEED "));
+  Serial.println(nextSpeedPercent);
+  sendSpeedStatus();
 }
 
 void handleSetCommand() {
@@ -232,13 +314,15 @@ void handleSetCommand() {
   char *steps2Token = strtok(NULL, " ");
   char *multiplierToken = strtok(NULL, " ");
   char *easingToken = strtok(NULL, " ");
+  char *easing2Token = strtok(NULL, " ");
 
   if (
     modeToken == NULL ||
     steps1Token == NULL ||
     steps2Token == NULL ||
     multiplierToken == NULL ||
-    easingToken == NULL
+    easingToken == NULL ||
+    easing2Token == NULL
   ) {
     Serial.println(F("ERR SET format"));
     return;
@@ -249,7 +333,8 @@ void handleSetCommand() {
     atoi(steps1Token),
     atoi(steps2Token),
     atoi(multiplierToken),
-    atoi(easingToken)
+    atoi(easingToken),
+    atoi(easing2Token)
   };
 
   if (!isValidMode(targetMode)) {
@@ -287,7 +372,9 @@ bool isValidConfig(ModeConfig config) {
     config.multiplier2 >= 1 &&
     config.multiplier2 <= 20 &&
     config.easing >= 0 &&
-    config.easing <= 5000
+    config.easing <= 5000 &&
+    config.easing2 >= 0 &&
+    config.easing2 <= 5000
   );
 }
 
@@ -298,6 +385,7 @@ void applyModeConfig(int targetMode, bool resetCounters) {
   activeSteps2 = config.steps2;
   activeMultiplier2 = config.multiplier2;
   activeEasing = config.easing;
+  activeEasing2 = config.easing2;
   if (resetCounters) {
     stepCount1 = 0;
     stepCount2 = 0;
@@ -316,12 +404,22 @@ void sendMode(int targetMode) {
   Serial.print(F(" "));
   Serial.print(config.multiplier2);
   Serial.print(F(" "));
-  Serial.println(config.easing);
+  Serial.print(config.easing);
+  Serial.print(F(" "));
+  Serial.println(config.easing2);
 }
 
 void sendActiveMode() {
   Serial.print(F("ACTIVE "));
   Serial.println(mode);
+}
+
+void sendSpeedStatus() {
+  Serial.print(F("SPEED "));
+  Serial.print(webSpeedEnabled ? F("WEB ") : F("POT "));
+  Serial.print(webSpeedEnabled ? webTargetSpeed : baseSpeed);
+  Serial.print(F(" "));
+  Serial.println(baseSpeed);
 }
 
 void reportActiveModePeriodically() {
@@ -331,6 +429,46 @@ void reportActiveModePeriodically() {
   }
   lastActiveReportMs = now;
   sendActiveMode();
+}
+
+void tryInitDisplay() {
+  displayReady = display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS);
+  if (displayReady) {
+    display.clearDisplay();
+    display.display();
+    lastDisplayRefreshMs = 0;
+    lastDisplayReinitMs = millis();
+    return;
+  }
+
+  Serial.println(F("OLED init failed, controller continues"));
+}
+
+void maintainDisplay() {
+  unsigned long now = millis();
+
+  if (!displayReady) {
+    if (now - lastDisplayRetryMs >= OLED_RETRY_INTERVAL_MS) {
+      lastDisplayRetryMs = now;
+      tryInitDisplay();
+      if (displayReady) {
+        tampilkanMode();
+      }
+    }
+    return;
+  }
+
+  if (now - lastDisplayReinitMs >= OLED_REINIT_INTERVAL_MS) {
+    lastDisplayReinitMs = now;
+    tryInitDisplay();
+    tampilkanMode();
+    return;
+  }
+
+  if (now - lastDisplayRefreshMs >= OLED_REFRESH_INTERVAL_MS) {
+    lastDisplayRefreshMs = now;
+    tampilkanMode();
+  }
 }
 
 void saveConfigsToEeprom() {
@@ -344,12 +482,40 @@ void saveConfigsToEeprom() {
 }
 
 bool loadConfigsFromEeprom() {
-  StoredConfig stored;
-  EEPROM.get(0, stored);
+  unsigned long magic;
+  byte version;
+  EEPROM.get(0, magic);
+  EEPROM.get(sizeof(magic), version);
 
-  if (stored.magic != EEPROM_MAGIC || stored.version != EEPROM_VERSION) {
+  if (magic != EEPROM_MAGIC) {
     return false;
   }
+
+  if (version == 1) {
+    StoredConfigV1 storedV1;
+    EEPROM.get(0, storedV1);
+    for (int i = 0; i < MODE_COUNT; i++) {
+      ModeConfig nextConfig = {
+        storedV1.modes[i].steps1,
+        storedV1.modes[i].steps2,
+        storedV1.modes[i].multiplier2,
+        storedV1.modes[i].easing,
+        storedV1.modes[i].easing
+      };
+      if (!isValidConfig(nextConfig)) {
+        return false;
+      }
+      modeConfigs[i] = nextConfig;
+    }
+    return true;
+  }
+
+  if (version != EEPROM_VERSION) {
+    return false;
+  }
+
+  StoredConfig stored;
+  EEPROM.get(0, stored);
 
   for (int i = 0; i < MODE_COUNT; i++) {
     if (!isValidConfig(stored.modes[i])) {
@@ -381,6 +547,7 @@ ISR(TIMER1_COMPA_vect) {
   int localSteps2 = activeSteps2;
   int localMultiplier2 = activeMultiplier2;
   int localEasing = activeEasing;
+  int localEasing2 = activeEasing2;
 
   if (localSteps1 <= 0) {
     return;
@@ -409,7 +576,21 @@ ISR(TIMER1_COMPA_vect) {
   }
 
   if (localSteps2 > 0) {
-    for (int i = 0; i < localMultiplier2; i++) {
+    if (localEasing2 > localSteps2 / 2) {
+      localEasing2 = localSteps2 / 2;
+    }
+
+    int effectiveMultiplier2 = localMultiplier2;
+    if (localEasing2 > 0 && stepCount2 < localEasing2) {
+      effectiveMultiplier2 = map(stepCount2, 0, localEasing2, 1, localMultiplier2);
+    } else if (localEasing2 > 0 && stepCount2 > localSteps2 - localEasing2) {
+      effectiveMultiplier2 = map(localSteps2 - stepCount2, 0, localEasing2, 1, localMultiplier2);
+    }
+    if (effectiveMultiplier2 < 1) {
+      effectiveMultiplier2 = 1;
+    }
+
+    for (int i = 0; i < effectiveMultiplier2; i++) {
       digitalWrite(stepPin2, HIGH);
       delayMicroseconds(2);
       digitalWrite(stepPin2, LOW);
@@ -428,7 +609,11 @@ ISR(TIMER1_COMPA_vect) {
   if (effectiveSpeed1 < 1) {
     effectiveSpeed1 = 1;
   }
-  OCR1A = 16000000 / (2 * effectiveSpeed1);
+  unsigned long nextCompare = 16000000UL / (2UL * effectiveSpeed1);
+  if (nextCompare > 65535UL) {
+    nextCompare = 65535UL;
+  }
+  OCR1A = (uint16_t)nextCompare;
 }
 
 void tampilkanMode() {
@@ -453,5 +638,7 @@ void tampilkanMode() {
   display.print(modeConfigs[mode].multiplier2);
   display.print(F(" E "));
   display.print(modeConfigs[mode].easing);
+  display.print(F("/"));
+  display.print(modeConfigs[mode].easing2);
   display.display();
 }

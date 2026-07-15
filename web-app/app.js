@@ -1,18 +1,21 @@
 const MODE_COUNT = 11;
 const BAUD_RATE = 9600;
+const SPEED_MIN = 0;
+const SPEED_MAX = 100;
+const SPEED_STEP = 1;
 
 const defaultModes = [
-  [1000, 2000, 3, 150],
-  [1500, 2300, 3, 150],
-  [2000, 2500, 3, 150],
-  [2300, 2700, 3, 150],
-  [2500, 3000, 3, 150],
-  [800, 4000, 3, 150],
-  [1500, 4300, 3, 150],
-  [2000, 4500, 3, 150],
-  [2300, 4000, 3, 150],
-  [2700, 0, 3, 150],
-  [3000, 0, 3, 150]
+  [1000, 2000, 3, 150, 150],
+  [1500, 2300, 3, 150, 150],
+  [2000, 2500, 3, 150, 150],
+  [2300, 2700, 3, 150, 150],
+  [2500, 3000, 3, 150, 150],
+  [800, 4000, 3, 150, 150],
+  [1500, 4300, 3, 150, 150],
+  [2000, 4500, 3, 150, 150],
+  [2300, 4000, 3, 150, 150],
+  [2700, 0, 3, 150, 150],
+  [3000, 0, 3, 150, 150]
 ];
 
 const connectButton = document.querySelector("#connectButton");
@@ -26,6 +29,15 @@ const saveButton = document.querySelector("#saveButton");
 const loadButton = document.querySelector("#loadButton");
 const clearLogButton = document.querySelector("#clearLogButton");
 const commandStatus = document.querySelector("#commandStatus");
+const speedPanel = document.querySelector("#speedPanel");
+const speedValue = document.querySelector("#speedValue");
+const speedSource = document.querySelector("#speedSource");
+const speedSlider = document.querySelector("#speedSlider");
+const speedDownButton = document.querySelector("#speedDownButton");
+const setSpeedButton = document.querySelector("#setSpeedButton");
+const speedUpButton = document.querySelector("#speedUpButton");
+const stopButton = document.querySelector("#stopButton");
+const potButton = document.querySelector("#potButton");
 const modeTableBody = document.querySelector("#modeTableBody");
 const logOutput = document.querySelector("#logOutput");
 
@@ -36,6 +48,7 @@ let keepReading = false;
 let incomingBuffer = "";
 let activeMode = null;
 let lastSentMode = null;
+let currentSpeed = 0;
 
 function buildUi() {
   for (let mode = 0; mode < MODE_COUNT; mode++) {
@@ -52,6 +65,7 @@ function buildUi() {
       <td><input data-field="steps2" type="number" min="0" max="30000" step="1" value="${defaultModes[mode][1]}"></td>
       <td><input data-field="multiplier2" type="number" min="1" max="20" step="1" value="${defaultModes[mode][2]}"></td>
       <td><input data-field="easing" type="number" min="0" max="5000" step="1" value="${defaultModes[mode][3]}"></td>
+      <td><input data-field="easing2" type="number" min="0" max="5000" step="1" value="${defaultModes[mode][4]}"></td>
       <td><button class="row-action" type="button" data-apply="${mode}" disabled>Send</button></td>
     `;
     modeTableBody.append(row);
@@ -92,14 +106,16 @@ function getRowValues(mode) {
     steps1: Number(row.querySelector('[data-field="steps1"]').value),
     steps2: Number(row.querySelector('[data-field="steps2"]').value),
     multiplier2: Number(row.querySelector('[data-field="multiplier2"]').value),
-    easing: Number(row.querySelector('[data-field="easing"]').value)
+    easing: Number(row.querySelector('[data-field="easing"]').value),
+    easing2: Number(row.querySelector('[data-field="easing2"]').value)
   };
 
   const rules = {
     steps1: values.steps1 >= 1 && values.steps1 <= 30000,
     steps2: values.steps2 >= 0 && values.steps2 <= 30000,
     multiplier2: values.multiplier2 >= 1 && values.multiplier2 <= 20,
-    easing: values.easing >= 0 && values.easing <= 5000
+    easing: values.easing >= 0 && values.easing <= 5000,
+    easing2: values.easing2 >= 0 && values.easing2 <= 5000
   };
 
   row.querySelectorAll("input").forEach((input) => {
@@ -124,6 +140,7 @@ function updateRowFromModeLine(parts) {
   row.querySelector('[data-field="steps2"]').value = parts[3];
   row.querySelector('[data-field="multiplier2"]').value = parts[4];
   row.querySelector('[data-field="easing"]').value = parts[5];
+  row.querySelector('[data-field="easing2"]').value = parts[6] || parts[5];
 }
 
 function markModeSent(mode) {
@@ -147,6 +164,23 @@ function updateActiveMode(mode) {
   document.querySelectorAll("#modeTableBody tr").forEach((row) => {
     row.classList.toggle("active-row", Number(row.dataset.mode) === mode);
   });
+}
+
+function clampSpeed(value) {
+  return Math.max(SPEED_MIN, Math.min(SPEED_MAX, value));
+}
+
+function updateSpeedUi(value, source = "WEB") {
+  currentSpeed = clampSpeed(Number(value) || 0);
+  speedSlider.value = String(currentSpeed);
+  speedValue.textContent = String(currentSpeed);
+  speedSource.textContent = source === "POT" ? "Potensio" : "Web UI";
+}
+
+function sendSpeedNow(value) {
+  const nextSpeed = clampSpeed(Number(value) || 0);
+  updateSpeedUi(nextSpeed, "WEB");
+  sendCommand(`SPEED ${nextSpeed}`);
 }
 
 async function connectSerial() {
@@ -250,6 +284,23 @@ function flushIncomingLines() {
       setCommandStatus("EEPROM dimuat", "ok");
       return;
     }
+    if (parts[0] === "OK" && parts[1] === "SPEED") {
+      log(`< ${cleanLine}`);
+      setCommandStatus(`Speed ${parts[2]}%`, "ok");
+      return;
+    }
+    if (parts[0] === "OK" && parts[1] === "POT") {
+      log(`< ${cleanLine}`);
+      setCommandStatus("Kontrol balik ke potensio", "ok");
+      speedSource.textContent = "Potensio";
+      return;
+    }
+    if (parts[0] === "OK" && parts[1] === "STOP") {
+      log(`< ${cleanLine}`);
+      updateSpeedUi(0, "WEB");
+      setCommandStatus("Stop", "ok");
+      return;
+    }
     if (parts[0] === "ERR") {
       log(`< ${cleanLine}`);
       setCommandStatus(cleanLine, "error");
@@ -268,6 +319,16 @@ function flushIncomingLines() {
         }
         updateActiveMode(mode);
       }
+      return;
+    }
+    if (parts[0] === "SPEED") {
+      const source = parts[1] === "POT" ? "POT" : "WEB";
+      if (source === "POT") {
+        updateSpeedUi(0, source);
+      } else {
+        speedSource.textContent = "Web UI";
+      }
+      log(`< ${cleanLine}`);
       return;
     }
     log(`< ${cleanLine}`);
@@ -296,6 +357,7 @@ async function sendModeConfig(mode) {
     setCommandStatus(`Mengirim Mode ${mode}...`);
     await sendCommand(
       `SET ${mode} ${values.steps1} ${values.steps2} ${values.multiplier2} ${values.easing}`
+        + ` ${values.easing2}`
     );
   } catch (error) {
     log(error.message);
@@ -309,6 +371,30 @@ saveButton.addEventListener("click", () => sendCommand("SAVE"));
 loadButton.addEventListener("click", () => sendCommand("LOAD"));
 setModeButton.addEventListener("click", () => {
   sendCommand(`MODE ${activeModeSelect.value}`);
+});
+speedSlider.addEventListener("input", () => {
+  sendSpeedNow(speedSlider.value);
+});
+speedPanel.addEventListener("wheel", (event) => {
+  event.preventDefault();
+  const direction = event.deltaY < 0 ? 1 : -1;
+  sendSpeedNow(Number(speedSlider.value) + direction * SPEED_STEP);
+});
+speedDownButton.addEventListener("click", () => {
+  sendSpeedNow(Number(speedSlider.value) - SPEED_STEP);
+});
+speedUpButton.addEventListener("click", () => {
+  sendSpeedNow(Number(speedSlider.value) + SPEED_STEP);
+});
+setSpeedButton.addEventListener("click", () => {
+  sendSpeedNow(speedSlider.value);
+});
+stopButton.addEventListener("click", () => {
+  updateSpeedUi(0, "WEB");
+  sendCommand("STOP");
+});
+potButton.addEventListener("click", () => {
+  sendCommand("POT");
 });
 clearLogButton.addEventListener("click", () => {
   logOutput.textContent = "";
