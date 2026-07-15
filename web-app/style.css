@@ -168,6 +168,11 @@ h2 {
   outline-offset: -2px;
 }
 
+.speed-panel.locked {
+  border-color: var(--accent);
+  background: #ecfdf5;
+}
+
 .speed-readout {
   display: grid;
   gap: 4px;
@@ -212,6 +217,18 @@ h2 {
 
 #potButton:hover:not(:disabled) {
   background: #eef2f6;
+}
+
+#speedLockButton {
+  background: #334155;
+}
+
+#speedLockButton:hover:not(:disabled) {
+  background: #1f2937;
+}
+
+#speedLockButton.locked {
+  background: #0f766e;
 }
 
 label {

@@ -36,6 +36,7 @@ const speedSlider = document.querySelector("#speedSlider");
 const speedDownButton = document.querySelector("#speedDownButton");
 const setSpeedButton = document.querySelector("#setSpeedButton");
 const speedUpButton = document.querySelector("#speedUpButton");
+const speedLockButton = document.querySelector("#speedLockButton");
 const stopButton = document.querySelector("#stopButton");
 const potButton = document.querySelector("#potButton");
 const modeTableBody = document.querySelector("#modeTableBody");
@@ -49,6 +50,7 @@ let incomingBuffer = "";
 let activeMode = null;
 let lastSentMode = null;
 let currentSpeed = 0;
+let speedLockEnabled = false;
 
 function buildUi() {
   for (let mode = 0; mode < MODE_COUNT; mode++) {
@@ -179,8 +181,20 @@ function updateSpeedUi(value, source = "WEB") {
 
 function sendSpeedNow(value) {
   const nextSpeed = clampSpeed(Number(value) || 0);
+  if (nextSpeed === currentSpeed && speedSource.textContent === "Web UI") {
+    return;
+  }
   updateSpeedUi(nextSpeed, "WEB");
   sendCommand(`SPEED ${nextSpeed}`);
+}
+
+function setSpeedLock(enabled) {
+  speedLockEnabled = enabled;
+  speedPanel.classList.toggle("locked", enabled);
+  speedLockButton.classList.toggle("locked", enabled);
+  speedLockButton.setAttribute("aria-pressed", enabled ? "true" : "false");
+  speedLockButton.textContent = enabled ? "Unlock Speed" : "Lock Speed";
+  setCommandStatus(enabled ? "Speed Lock ON" : "Speed Lock OFF", enabled ? "ok" : "");
 }
 
 async function connectSerial() {
@@ -386,6 +400,9 @@ speedDownButton.addEventListener("click", () => {
 speedUpButton.addEventListener("click", () => {
   sendSpeedNow(Number(speedSlider.value) + SPEED_STEP);
 });
+speedLockButton.addEventListener("click", () => {
+  setSpeedLock(!speedLockEnabled);
+});
 setSpeedButton.addEventListener("click", () => {
   sendSpeedNow(speedSlider.value);
 });
@@ -395,6 +412,36 @@ stopButton.addEventListener("click", () => {
 });
 potButton.addEventListener("click", () => {
   sendCommand("POT");
+});
+window.addEventListener("wheel", (event) => {
+  if (!speedLockEnabled) {
+    return;
+  }
+
+  event.preventDefault();
+  const direction = event.deltaY < 0 ? 1 : -1;
+  sendSpeedNow(Number(speedSlider.value) + direction * SPEED_STEP);
+}, { passive: false });
+window.addEventListener("mousedown", (event) => {
+  if (!speedLockEnabled || event.button !== 1) {
+    return;
+  }
+
+  event.preventDefault();
+  updateSpeedUi(0, "WEB");
+  sendCommand("STOP");
+});
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && speedLockEnabled) {
+    setSpeedLock(false);
+    return;
+  }
+
+  if (event.code === "Space" && speedLockEnabled) {
+    event.preventDefault();
+    updateSpeedUi(0, "WEB");
+    sendCommand("STOP");
+  }
 });
 clearLogButton.addEventListener("click", () => {
   logOutput.textContent = "";
