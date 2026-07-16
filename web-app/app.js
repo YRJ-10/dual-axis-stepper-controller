@@ -23,8 +23,7 @@ const connectButton = document.querySelector("#connectButton");
 const disconnectButton = document.querySelector("#disconnectButton");
 const connectionStatus = document.querySelector("#connectionStatus");
 const currentActiveMode = document.querySelector("#currentActiveMode");
-const activeModeSelect = document.querySelector("#activeModeSelect");
-const setModeButton = document.querySelector("#setModeButton");
+const modeButtonGroup = document.querySelector("#modeButtonGroup");
 const readButton = document.querySelector("#readButton");
 const saveButton = document.querySelector("#saveButton");
 const loadButton = document.querySelector("#loadButton");
@@ -34,9 +33,6 @@ const speedPanel = document.querySelector("#speedPanel");
 const speedValue = document.querySelector("#speedValue");
 const speedSource = document.querySelector("#speedSource");
 const speedSlider = document.querySelector("#speedSlider");
-const speedDownButton = document.querySelector("#speedDownButton");
-const setSpeedButton = document.querySelector("#setSpeedButton");
-const speedUpButton = document.querySelector("#speedUpButton");
 const speedLockButton = document.querySelector("#speedLockButton");
 const stopButton = document.querySelector("#stopButton");
 const potButton = document.querySelector("#potButton");
@@ -57,10 +53,15 @@ let speedLockEnabled = false;
 
 function buildUi() {
   for (let mode = 0; mode < MODE_COUNT; mode++) {
-    const option = document.createElement("option");
-    option.value = String(mode);
-    option.textContent = `Mode ${mode}`;
-    activeModeSelect.append(option);
+    const modeButton = document.createElement("button");
+    modeButton.type = "button";
+    modeButton.className = "mode-select-button";
+    modeButton.dataset.modeSelect = String(mode);
+    modeButton.textContent = String(mode);
+    modeButton.title = `Aktifkan Mode ${mode}`;
+    modeButton.setAttribute("aria-pressed", "false");
+    modeButton.disabled = true;
+    modeButtonGroup.append(modeButton);
 
     const row = document.createElement("tr");
     row.dataset.mode = String(mode);
@@ -80,11 +81,13 @@ function buildUi() {
 function setConnectedState(isConnected) {
   connectButton.disabled = isConnected;
   disconnectButton.disabled = !isConnected;
-  setModeButton.disabled = !isConnected;
   readButton.disabled = !isConnected;
   saveButton.disabled = !isConnected;
   loadButton.disabled = !isConnected;
   document.querySelectorAll("[data-apply]").forEach((button) => {
+    button.disabled = !isConnected;
+  });
+  document.querySelectorAll("[data-mode-select]").forEach((button) => {
     button.disabled = !isConnected;
   });
   connectionStatus.textContent = isConnected ? "Terhubung ke Arduino" : "Belum terhubung";
@@ -166,6 +169,11 @@ function markModeSent(mode) {
 function updateActiveMode(mode) {
   activeMode = mode;
   currentActiveMode.textContent = mode === null ? "-" : `Mode ${mode}`;
+  document.querySelectorAll("[data-mode-select]").forEach((button) => {
+    const isActive = Number(button.dataset.modeSelect) === mode;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
   document.querySelectorAll("#modeTableBody tr").forEach((row) => {
     row.classList.toggle("active-row", Number(row.dataset.mode) === mode);
   });
@@ -216,8 +224,8 @@ function setSpeedLock(enabled) {
   speedPanel.classList.toggle("locked", enabled);
   speedLockButton.classList.toggle("locked", enabled);
   speedLockButton.setAttribute("aria-pressed", enabled ? "true" : "false");
-  speedLockButton.textContent = enabled ? "Unlock Speed" : "Lock Speed";
-  setCommandStatus(enabled ? "Speed Lock ON" : "Speed Lock OFF", enabled ? "ok" : "");
+  speedLockButton.textContent = enabled ? "Unlock Slider" : "Lock Slider";
+  setCommandStatus(enabled ? "Slider Lock ON" : "Slider Lock OFF", enabled ? "ok" : "");
 }
 
 async function connectSerial() {
@@ -412,8 +420,12 @@ disconnectButton.addEventListener("click", disconnectSerial);
 readButton.addEventListener("click", () => sendCommand("DUMP"));
 saveButton.addEventListener("click", () => sendCommand("SAVE"));
 loadButton.addEventListener("click", () => sendCommand("LOAD"));
-setModeButton.addEventListener("click", () => {
-  sendCommand(`MODE ${activeModeSelect.value}`);
+modeButtonGroup.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-mode-select]");
+  if (!button) {
+    return;
+  }
+  sendCommand(`MODE ${button.dataset.modeSelect}`);
 });
 speedSlider.addEventListener("input", () => {
   setSpeedTarget(speedSlider.value);
@@ -424,17 +436,8 @@ speedPanel.addEventListener("wheel", (event) => {
   const direction = event.deltaY < 0 ? 1 : -1;
   setSpeedTarget(Number(speedSlider.value) + direction * SPEED_STEP);
 });
-speedDownButton.addEventListener("click", () => {
-  setSpeedTarget(Number(speedSlider.value) - SPEED_STEP);
-});
-speedUpButton.addEventListener("click", () => {
-  setSpeedTarget(Number(speedSlider.value) + SPEED_STEP);
-});
 speedLockButton.addEventListener("click", () => {
   setSpeedLock(!speedLockEnabled);
-});
-setSpeedButton.addEventListener("click", () => {
-  setSpeedTarget(speedSlider.value);
 });
 stopButton.addEventListener("click", () => {
   stopSpeedRamp();

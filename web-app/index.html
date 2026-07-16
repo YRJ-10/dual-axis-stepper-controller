@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Dual Axis Stepper Tuner</title>
-    <link rel="stylesheet" href="./style.css">
+    <link rel="stylesheet" href="./style.css?v=20260716-mode-buttons">
   </head>
   <body>
     <main class="app-shell">
@@ -24,11 +24,10 @@
       </section>
 
       <section class="control-strip" aria-label="Mode controls">
-        <label>
-          Mode Aktif
-          <select id="activeModeSelect"></select>
-        </label>
-        <button id="setModeButton" type="button" disabled>Set Mode</button>
+        <div class="mode-picker">
+          <span>Mode Aktif</span>
+          <div id="modeButtonGroup" class="mode-button-group" role="group" aria-label="Pilih mode aktif"></div>
+        </div>
         <button id="readButton" type="button" disabled>Read Arduino</button>
         <button id="saveButton" type="button" disabled>Save EEPROM</button>
         <button id="loadButton" type="button" disabled>Load EEPROM</button>
@@ -43,10 +42,7 @@
         </div>
         <input id="speedSlider" type="range" min="0" max="100" step="1" value="0">
         <div class="speed-actions">
-          <button id="speedDownButton" type="button">-</button>
-          <button id="setSpeedButton" type="button">Set Speed</button>
-          <button id="speedUpButton" type="button">+</button>
-          <button id="speedLockButton" type="button" aria-pressed="false">Lock Speed</button>
+          <button id="speedLockButton" type="button" aria-pressed="false">Lock Slider</button>
           <button id="stopButton" type="button">STOP</button>
           <button id="potButton" type="button">Potensio</button>
         </div>
@@ -78,6 +74,6 @@
       </section>
     </main>
 
-    <script src="./app.js?v=20260716-speed-ramp"></script>
+    <script src="./app.js?v=20260716-mode-buttons"></script>
   </body>
 </html>
