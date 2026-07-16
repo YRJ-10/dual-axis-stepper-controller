@@ -3,6 +3,7 @@ const BAUD_RATE = 9600;
 const SPEED_MIN = 0;
 const SPEED_MAX = 100;
 const SPEED_STEP = 1;
+const SPEED_RAMP_INTERVAL_MS = 80;
 
 const defaultModes = [
   [1000, 2000, 3, 150, 150],
@@ -50,6 +51,8 @@ let incomingBuffer = "";
 let activeMode = null;
 let lastSentMode = null;
 let currentSpeed = 0;
+let sentSpeed = 0;
+let speedRampTimer = null;
 let speedLockEnabled = false;
 
 function buildUi() {
@@ -179,13 +182,33 @@ function updateSpeedUi(value, source = "WEB") {
   speedSource.textContent = source === "POT" ? "Potensio" : "Web UI";
 }
 
-function sendSpeedNow(value) {
+function stopSpeedRamp() {
+  if (speedRampTimer !== null) {
+    clearInterval(speedRampTimer);
+    speedRampTimer = null;
+  }
+}
+
+function runSpeedRamp() {
+  if (sentSpeed === currentSpeed) {
+    stopSpeedRamp();
+    return;
+  }
+
+  sentSpeed += sentSpeed < currentSpeed ? SPEED_STEP : -SPEED_STEP;
+  sendCommand(`SPEED ${sentSpeed}`);
+}
+
+function setSpeedTarget(value) {
   const nextSpeed = clampSpeed(Number(value) || 0);
   if (nextSpeed === currentSpeed && speedSource.textContent === "Web UI") {
     return;
   }
+
   updateSpeedUi(nextSpeed, "WEB");
-  sendCommand(`SPEED ${nextSpeed}`);
+  if (speedRampTimer === null) {
+    speedRampTimer = setInterval(runSpeedRamp, SPEED_RAMP_INTERVAL_MS);
+  }
 }
 
 function setSpeedLock(enabled) {
@@ -220,6 +243,7 @@ async function connectSerial() {
 
 async function disconnectSerial() {
   keepReading = false;
+  stopSpeedRamp();
 
   try {
     if (reader) {
@@ -305,12 +329,15 @@ function flushIncomingLines() {
     }
     if (parts[0] === "OK" && parts[1] === "POT") {
       log(`< ${cleanLine}`);
+      stopSpeedRamp();
       setCommandStatus("Kontrol balik ke potensio", "ok");
       speedSource.textContent = "Potensio";
       return;
     }
     if (parts[0] === "OK" && parts[1] === "STOP") {
       log(`< ${cleanLine}`);
+      stopSpeedRamp();
+      sentSpeed = 0;
       updateSpeedUi(0, "WEB");
       setCommandStatus("Stop", "ok");
       return;
@@ -338,8 +365,10 @@ function flushIncomingLines() {
     if (parts[0] === "SPEED") {
       const source = parts[1] === "POT" ? "POT" : "WEB";
       if (source === "POT") {
+        stopSpeedRamp();
         updateSpeedUi(0, source);
       } else {
+        sentSpeed = clampSpeed(Math.round(Number(parts[2]) / 50));
         speedSource.textContent = "Web UI";
       }
       log(`< ${cleanLine}`);
@@ -387,40 +416,44 @@ setModeButton.addEventListener("click", () => {
   sendCommand(`MODE ${activeModeSelect.value}`);
 });
 speedSlider.addEventListener("input", () => {
-  sendSpeedNow(speedSlider.value);
+  setSpeedTarget(speedSlider.value);
 });
 speedPanel.addEventListener("wheel", (event) => {
   event.preventDefault();
+  event.stopPropagation();
   const direction = event.deltaY < 0 ? 1 : -1;
-  sendSpeedNow(Number(speedSlider.value) + direction * SPEED_STEP);
+  setSpeedTarget(Number(speedSlider.value) + direction * SPEED_STEP);
 });
 speedDownButton.addEventListener("click", () => {
-  sendSpeedNow(Number(speedSlider.value) - SPEED_STEP);
+  setSpeedTarget(Number(speedSlider.value) - SPEED_STEP);
 });
 speedUpButton.addEventListener("click", () => {
-  sendSpeedNow(Number(speedSlider.value) + SPEED_STEP);
+  setSpeedTarget(Number(speedSlider.value) + SPEED_STEP);
 });
 speedLockButton.addEventListener("click", () => {
   setSpeedLock(!speedLockEnabled);
 });
 setSpeedButton.addEventListener("click", () => {
-  sendSpeedNow(speedSlider.value);
+  setSpeedTarget(speedSlider.value);
 });
 stopButton.addEventListener("click", () => {
+  stopSpeedRamp();
+  sentSpeed = 0;
   updateSpeedUi(0, "WEB");
   sendCommand("STOP");
 });
 potButton.addEventListener("click", () => {
+  stopSpeedRamp();
   sendCommand("POT");
 });
 window.addEventListener("wheel", (event) => {
-  if (!speedLockEnabled) {
+  if (!speedLockEnabled || event.defaultPrevented) {
     return;
   }
 
   event.preventDefault();
   const direction = event.deltaY < 0 ? 1 : -1;
-  sendSpeedNow(Number(speedSlider.value) + direction * SPEED_STEP);
+  setSpeedTarget(Number(speedSlider.value) + direction * SPEED_STEP);
 }, { passive: false });
 window.addEventListener("mousedown", (event) => {
   if (!speedLockEnabled || event.button !== 1) {
@@ -428,6 +461,8 @@ window.addEventListener("mousedown", (event) => {
   }
 
   event.preventDefault();
+  stopSpeedRamp();
+  sentSpeed = 0;
   updateSpeedUi(0, "WEB");
   sendCommand("STOP");
 });
@@ -439,6 +474,8 @@ window.addEventListener("keydown", (event) => {
 
   if (event.code === "Space" && speedLockEnabled) {
     event.preventDefault();
+    stopSpeedRamp();
+    sentSpeed = 0;
     updateSpeedUi(0, "WEB");
     sendCommand("STOP");
   }
