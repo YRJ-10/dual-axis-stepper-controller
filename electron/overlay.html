@@ -13,9 +13,13 @@
         <span id="connectionLabel">OFFLINE</span>
       </header>
       <section class="readings">
-        <div>
+        <div class="mode-control">
           <span>MODE</span>
-          <strong id="modeValue">-</strong>
+          <div class="mode-picker">
+            <button id="previousMode" type="button" aria-label="Mode sebelumnya" title="Mode sebelumnya">-</button>
+            <strong id="modeValue">-</strong>
+            <button id="nextMode" type="button" aria-label="Mode berikutnya" title="Mode berikutnya">+</button>
+          </div>
         </div>
         <div>
           <span>SPEED</span>

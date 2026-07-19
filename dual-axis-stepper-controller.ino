@@ -26,7 +26,17 @@
 #define OLED_RETRY_INTERVAL_MS 2000
 #define OLED_REFRESH_INTERVAL_MS 1000
 #define OLED_REINIT_INTERVAL_MS 5000
-#define SPEED_RAMP_STEP 5
+#define FIRMWARE_ID "MOTION_SAFE_1"
+#define SPEED_RAMP_INTERVAL_MS 2
+#define SPEED_RAMP_STEP 2
+#define MOTION_TICK_HZ 40000UL
+#define MOTION_MAX_STEP_HZ 18000U
+#define MOTION_TARGET_UPDATE_US 500UL
+
+#define STEP1_MASK _BV(PD5)
+#define DIR1_MASK _BV(PD2)
+#define STEP2_MASK _BV(PB1)
+#define DIR2_MASK _BV(PB0)
 
 struct ModeConfig {
   int steps1;
@@ -76,11 +86,13 @@ const int threshold = 10;
 int mode = 0;
 bool lastButtonState = HIGH;
 bool displayReady = false;
-bool webSpeedEnabled = false;
+bool webSpeedEnabled = true;
 int webTargetSpeed = 0;
 unsigned long lastDisplayRetryMs = 0;
 unsigned long lastDisplayRefreshMs = 0;
 unsigned long lastDisplayReinitMs = 0;
+unsigned long lastSpeedRampMs = 0;
+unsigned long lastMotionTargetUs = 0;
 
 volatile int baseSpeed = 0;
 volatile int activeSteps1 = 1000;
@@ -92,6 +104,14 @@ volatile int stepCount1 = 0;
 volatile int stepCount2 = 0;
 volatile bool dirState1 = HIGH;
 volatile bool dirState2 = HIGH;
+volatile uint16_t targetStepHz1 = 0;
+volatile uint16_t targetStepHz2 = 0;
+volatile uint16_t phaseAccumulator1 = 0;
+volatile uint16_t phaseAccumulator2 = 0;
+volatile bool stepPulseHigh1 = false;
+volatile bool stepPulseHigh2 = false;
+volatile bool directionChangePending1 = false;
+volatile bool directionChangePending2 = false;
 
 char serialBuffer[SERIAL_BUFFER_SIZE];
 byte serialIndex = 0;
@@ -106,12 +126,15 @@ void setup() {
 
   digitalWrite(dirPin1, dirState1);
   digitalWrite(dirPin2, dirState2);
+  digitalWrite(stepPin1, LOW);
+  digitalWrite(stepPin2, LOW);
 
   Serial.begin(9600);
   Serial.println(F("Dual axis controller ready"));
-  Serial.println(F("Commands: SET mode steps1 steps2 multiplier2 easing1 easing2 | GET mode | DUMP | SAVE | LOAD | MODE mode | SPEED value | POT | STOP"));
+  sendFirmwareInfo();
+  Serial.println(F("Commands: INFO | SET mode steps1 steps2 multiplier2 easing1 easing2 | GET mode | DUMP | SAVE | LOAD | MODE mode | SPEED value | POT | STOP"));
 
-  tryInitDisplay();
+  tryInitDisplay(true);
 
   if (loadConfigsFromEeprom()) {
     Serial.println(F("OK EEPROM loaded"));
@@ -127,7 +150,7 @@ void setup() {
   cli();
   TCCR1A = 0;
   TCCR1B = (1 << WGM12) | (1 << CS10);
-  OCR1A = 500;
+  OCR1A = (F_CPU / MOTION_TICK_HZ) - 1;
   TIMSK1 |= (1 << OCIE1A);
   sei();
 }
@@ -136,6 +159,7 @@ void loop() {
   handleSerial();
   handleButton();
   updateBaseSpeed();
+  updateMotionTargets();
   maintainDisplay();
   reportActiveModePeriodically();
 }
@@ -154,29 +178,187 @@ void handleButton() {
 }
 
 void updateBaseSpeed() {
-  if (webSpeedEnabled) {
-    int nextSpeed = baseSpeed;
-    if (nextSpeed < webTargetSpeed) {
-      nextSpeed += SPEED_RAMP_STEP;
-      if (nextSpeed > webTargetSpeed) {
-        nextSpeed = webTargetSpeed;
-      }
-    } else if (nextSpeed > webTargetSpeed) {
-      nextSpeed -= SPEED_RAMP_STEP;
-      if (nextSpeed < webTargetSpeed) {
-        nextSpeed = webTargetSpeed;
-      }
+  int desiredSpeed = webTargetSpeed;
+  if (!webSpeedEnabled) {
+    potValue = analogRead(potPin);
+    desiredSpeed = map(potValue, 0, 1023, 500, 5000);
+    if (potValue < threshold) {
+      desiredSpeed = 0;
     }
-    baseSpeed = nextSpeed;
+  }
+
+  unsigned long now = millis();
+  unsigned long elapsed = now - lastSpeedRampMs;
+  if (elapsed < SPEED_RAMP_INTERVAL_MS) {
     return;
   }
 
-  potValue = analogRead(potPin);
-  int nextSpeed = map(potValue, 0, 1023, 500, 5000);
-  if (potValue < threshold) {
-    nextSpeed = 0;
+  unsigned long rampIntervals = elapsed / SPEED_RAMP_INTERVAL_MS;
+  lastSpeedRampMs += rampIntervals * SPEED_RAMP_INTERVAL_MS;
+  long maxChange = rampIntervals * SPEED_RAMP_STEP;
+  if (maxChange > 100) {
+    maxChange = 100;
   }
+
+  int nextSpeed;
+  noInterrupts();
+  nextSpeed = baseSpeed;
+  interrupts();
+
+  if (nextSpeed < desiredSpeed) {
+    long increased = (long)nextSpeed + maxChange;
+    nextSpeed = increased > desiredSpeed ? desiredSpeed : (int)increased;
+  } else if (nextSpeed > desiredSpeed) {
+    long decreased = (long)nextSpeed - maxChange;
+    nextSpeed = decreased < desiredSpeed ? desiredSpeed : (int)decreased;
+  }
+
+  noInterrupts();
   baseSpeed = nextSpeed;
+  interrupts();
+}
+
+int easedBaseSpeed(int localBaseSpeed, int position, int totalSteps, int easingSteps) {
+  if (localBaseSpeed <= 0 || totalSteps <= 0 || easingSteps <= 0) {
+    return localBaseSpeed;
+  }
+
+  int maximumEasing = totalSteps / 2;
+  if (easingSteps > maximumEasing) {
+    easingSteps = maximumEasing;
+  }
+  if (easingSteps <= 0) {
+    return localBaseSpeed;
+  }
+
+  int easingPosition = easingSteps;
+  if (position < easingSteps) {
+    easingPosition = position;
+  } else if (position > totalSteps - easingSteps) {
+    easingPosition = totalSteps - position;
+  }
+
+  if (easingPosition >= easingSteps) {
+    return localBaseSpeed;
+  }
+  if (easingPosition < 0) {
+    easingPosition = 0;
+  }
+
+  int minimumSpeed = localBaseSpeed / 4;
+  if (minimumSpeed < 1) {
+    minimumSpeed = 1;
+  }
+  return minimumSpeed
+    + ((long)(localBaseSpeed - minimumSpeed) * easingPosition / easingSteps);
+}
+
+int easedMotor2Multiplier(int multiplier, int position, int totalSteps, int easingSteps) {
+  if (multiplier <= 1 || totalSteps <= 0 || easingSteps <= 0) {
+    return multiplier;
+  }
+
+  int maximumEasing = totalSteps / 2;
+  if (easingSteps > maximumEasing) {
+    easingSteps = maximumEasing;
+  }
+  if (easingSteps <= 0) {
+    return multiplier;
+  }
+
+  int easingPosition = easingSteps;
+  if (position < easingSteps) {
+    easingPosition = position;
+  } else if (position > totalSteps - easingSteps) {
+    easingPosition = totalSteps - position;
+  }
+
+  if (easingPosition >= easingSteps) {
+    return multiplier;
+  }
+  if (easingPosition < 0) {
+    easingPosition = 0;
+  }
+
+  return 1 + ((long)(multiplier - 1) * easingPosition / easingSteps);
+}
+
+void updateMotionTargets() {
+  unsigned long now = micros();
+  if (now - lastMotionTargetUs < MOTION_TARGET_UPDATE_US) {
+    return;
+  }
+  lastMotionTargetUs = now;
+
+  int localBaseSpeed;
+  int localSteps1;
+  int localSteps2;
+  int localMultiplier2;
+  int localEasing1;
+  int localEasing2;
+  int localStepCount1;
+  int localStepCount2;
+
+  noInterrupts();
+  localBaseSpeed = baseSpeed;
+  localSteps1 = activeSteps1;
+  localSteps2 = activeSteps2;
+  localMultiplier2 = activeMultiplier2;
+  localEasing1 = activeEasing;
+  localEasing2 = activeEasing2;
+  localStepCount1 = stepCount1;
+  localStepCount2 = stepCount2;
+  interrupts();
+
+  unsigned long requestedHz1 = 0;
+  unsigned long requestedHz2 = 0;
+  if (localBaseSpeed > 0 && localSteps1 > 0) {
+    int effectiveBase = easedBaseSpeed(
+      localBaseSpeed,
+      localStepCount1,
+      localSteps1,
+      localEasing1
+    );
+    requestedHz1 = (unsigned long)effectiveBase * 2UL;
+
+    if (localSteps2 > 0) {
+      int effectiveMultiplier = easedMotor2Multiplier(
+        localMultiplier2,
+        localStepCount2,
+        localSteps2,
+        localEasing2
+      );
+      requestedHz2 = requestedHz1 * (unsigned long)effectiveMultiplier;
+    }
+  }
+
+  uint16_t nextHz1 = requestedHz1 > MOTION_MAX_STEP_HZ
+    ? MOTION_MAX_STEP_HZ
+    : (uint16_t)requestedHz1;
+  uint16_t nextHz2 = requestedHz2 > MOTION_MAX_STEP_HZ
+    ? MOTION_MAX_STEP_HZ
+    : (uint16_t)requestedHz2;
+
+  noInterrupts();
+  targetStepHz1 = nextHz1;
+  targetStepHz2 = nextHz2;
+  interrupts();
+}
+
+void stopMotionImmediately() {
+  noInterrupts();
+  baseSpeed = 0;
+  targetStepHz1 = 0;
+  targetStepHz2 = 0;
+  phaseAccumulator1 = 0;
+  phaseAccumulator2 = 0;
+  stepPulseHigh1 = false;
+  stepPulseHigh2 = false;
+  directionChangePending1 = false;
+  directionChangePending2 = false;
+  PORTD &= ~STEP1_MASK;
+  PORTB &= ~STEP2_MASK;
+  interrupts();
 }
 
 void handleSerial() {
@@ -203,6 +385,11 @@ void processCommand(char *line) {
     return;
   }
   uppercase(cmd);
+
+  if (strcmp(cmd, "INFO") == 0) {
+    sendFirmwareInfo();
+    return;
+  }
 
   if (strcmp(cmd, "SET") == 0) {
     handleSetCommand();
@@ -279,13 +466,18 @@ void processCommand(char *line) {
   if (strcmp(cmd, "STOP") == 0) {
     webSpeedEnabled = true;
     webTargetSpeed = 0;
-    baseSpeed = 0;
+    stopMotionImmediately();
     Serial.println(F("OK STOP"));
     sendSpeedStatus();
     return;
   }
 
   Serial.println(F("ERR command"));
+}
+
+void sendFirmwareInfo() {
+  Serial.print(F("FW "));
+  Serial.println(F(FIRMWARE_ID));
 }
 
 void handleSpeedCommand() {
@@ -431,7 +623,7 @@ void reportActiveModePeriodically() {
   sendActiveMode();
 }
 
-void tryInitDisplay() {
+void tryInitDisplay(bool reportFailure) {
   displayReady = display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS);
   if (displayReady) {
     display.clearDisplay();
@@ -441,7 +633,9 @@ void tryInitDisplay() {
     return;
   }
 
-  Serial.println(F("OLED init failed, controller continues"));
+  if (reportFailure) {
+    Serial.println(F("OLED init failed, controller continues"));
+  }
 }
 
 void maintainDisplay() {
@@ -450,7 +644,7 @@ void maintainDisplay() {
   if (!displayReady) {
     if (now - lastDisplayRetryMs >= OLED_RETRY_INTERVAL_MS) {
       lastDisplayRetryMs = now;
-      tryInitDisplay();
+      tryInitDisplay(false);
       if (displayReady) {
         tampilkanMode();
       }
@@ -460,7 +654,7 @@ void maintainDisplay() {
 
   if (now - lastDisplayReinitMs >= OLED_REINIT_INTERVAL_MS) {
     lastDisplayReinitMs = now;
-    tryInitDisplay();
+    tryInitDisplay(false);
     tampilkanMode();
     return;
   }
@@ -538,82 +732,82 @@ void uppercase(char *text) {
 }
 
 ISR(TIMER1_COMPA_vect) {
-  int localBaseSpeed = baseSpeed;
-  if (localBaseSpeed <= 0) {
-    return;
-  }
+  bool motor1WasHigh = stepPulseHigh1;
+  bool motor2WasHigh = stepPulseHigh2;
+  uint16_t localTargetHz1 = targetStepHz1;
+  uint16_t localTargetHz2 = targetStepHz2;
 
-  int localSteps1 = activeSteps1;
-  int localSteps2 = activeSteps2;
-  int localMultiplier2 = activeMultiplier2;
-  int localEasing = activeEasing;
-  int localEasing2 = activeEasing2;
-
-  if (localSteps1 <= 0) {
-    return;
-  }
-
-  if (localEasing > localSteps1 / 2) {
-    localEasing = localSteps1 / 2;
-  }
-
-  int effectiveSpeed1 = localBaseSpeed;
-  if (localEasing > 0 && stepCount1 < localEasing) {
-    effectiveSpeed1 = map(stepCount1, 0, localEasing, localBaseSpeed / 4, localBaseSpeed);
-  } else if (localEasing > 0 && stepCount1 > localSteps1 - localEasing) {
-    effectiveSpeed1 = map(localSteps1 - stepCount1, 0, localEasing, localBaseSpeed / 4, localBaseSpeed);
-  }
-
-  digitalWrite(stepPin1, HIGH);
-  delayMicroseconds(2);
-  digitalWrite(stepPin1, LOW);
-  stepCount1++;
-
-  if (stepCount1 >= localSteps1) {
-    stepCount1 = 0;
-    dirState1 = !dirState1;
-    digitalWrite(dirPin1, dirState1);
-  }
-
-  if (localSteps2 > 0) {
-    if (localEasing2 > localSteps2 / 2) {
-      localEasing2 = localSteps2 / 2;
+  if (motor1WasHigh) {
+    PORTD &= ~STEP1_MASK;
+    stepPulseHigh1 = false;
+    if (directionChangePending1) {
+      dirState1 = !dirState1;
+      if (dirState1) {
+        PORTD |= DIR1_MASK;
+      } else {
+        PORTD &= ~DIR1_MASK;
+      }
+      directionChangePending1 = false;
     }
-
-    int effectiveMultiplier2 = localMultiplier2;
-    if (localEasing2 > 0 && stepCount2 < localEasing2) {
-      effectiveMultiplier2 = map(stepCount2, 0, localEasing2, 1, localMultiplier2);
-    } else if (localEasing2 > 0 && stepCount2 > localSteps2 - localEasing2) {
-      effectiveMultiplier2 = map(localSteps2 - stepCount2, 0, localEasing2, 1, localMultiplier2);
+  }
+  if (motor2WasHigh) {
+    PORTB &= ~STEP2_MASK;
+    stepPulseHigh2 = false;
+    if (directionChangePending2) {
+      dirState2 = !dirState2;
+      if (dirState2) {
+        PORTB |= DIR2_MASK;
+      } else {
+        PORTB &= ~DIR2_MASK;
+      }
+      directionChangePending2 = false;
     }
-    if (effectiveMultiplier2 < 1) {
-      effectiveMultiplier2 = 1;
-    }
+  }
 
-    for (int i = 0; i < effectiveMultiplier2; i++) {
-      digitalWrite(stepPin2, HIGH);
-      delayMicroseconds(2);
-      digitalWrite(stepPin2, LOW);
-      delayMicroseconds(2);
-      stepCount2++;
+  if (localTargetHz1 == 0 || activeSteps1 <= 0) {
+    phaseAccumulator1 = 0;
+  } else {
+    phaseAccumulator1 += localTargetHz1;
+    if (!motor1WasHigh && phaseAccumulator1 >= MOTION_TICK_HZ) {
+      phaseAccumulator1 -= MOTION_TICK_HZ;
+      PORTD |= STEP1_MASK;
+      stepPulseHigh1 = true;
+      stepCount1++;
 
-      if (stepCount2 >= localSteps2) {
-        stepCount2 = 0;
-        dirState2 = !dirState2;
-        digitalWrite(dirPin2, dirState2);
-        break;
+      if (stepCount1 >= activeSteps1) {
+        stepCount1 = 0;
+        directionChangePending1 = true;
+        if (activeEasing > 0) {
+          uint16_t easedHz1 = localTargetHz1 >> 2;
+          uint16_t easedHz2 = localTargetHz2 >> 2;
+          targetStepHz1 = easedHz1 > 0 ? easedHz1 : 1;
+          targetStepHz2 = easedHz2 > 0 ? easedHz2 : 1;
+        }
+        phaseAccumulator1 = 0;
       }
     }
   }
 
-  if (effectiveSpeed1 < 1) {
-    effectiveSpeed1 = 1;
+  if (localTargetHz2 == 0 || activeSteps2 <= 0) {
+    phaseAccumulator2 = 0;
+  } else {
+    phaseAccumulator2 += localTargetHz2;
+    if (!motor2WasHigh && phaseAccumulator2 >= MOTION_TICK_HZ) {
+      phaseAccumulator2 -= MOTION_TICK_HZ;
+      PORTB |= STEP2_MASK;
+      stepPulseHigh2 = true;
+      stepCount2++;
+
+      if (stepCount2 >= activeSteps2) {
+        stepCount2 = 0;
+        directionChangePending2 = true;
+        if (activeEasing2 > 0) {
+          targetStepHz2 = targetStepHz1 > 0 ? targetStepHz1 : 1;
+        }
+        phaseAccumulator2 = 0;
+      }
+    }
   }
-  unsigned long nextCompare = 16000000UL / (2UL * effectiveSpeed1);
-  if (nextCompare > 65535UL) {
-    nextCompare = 65535UL;
-  }
-  OCR1A = (uint16_t)nextCompare;
 }
 
 void tampilkanMode() {

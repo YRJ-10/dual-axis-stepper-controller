@@ -60,7 +60,7 @@ header {
 .readings {
   display: grid;
   height: calc(100% - 25px);
-  grid-template-columns: 0.8fr 1fr 1.25fr;
+  grid-template-columns: 1.2fr 0.85fr 1.15fr;
   align-items: center;
 }
 
@@ -88,6 +88,45 @@ header {
   line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.mode-control {
+  padding: 0 7px !important;
+}
+
+.mode-picker {
+  display: grid;
+  grid-template-columns: 22px minmax(28px, 1fr) 22px;
+  align-items: center;
+  gap: 3px;
+}
+
+.mode-picker strong {
+  text-align: center;
+}
+
+.mode-picker button {
+  width: 22px;
+  height: 26px;
+  border: 1px solid #64748b;
+  border-radius: 4px;
+  padding: 0;
+  background: rgba(15, 23, 42, 0.72);
+  color: #f8fafc;
+  cursor: pointer;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.mode-picker button:hover:not(:disabled) {
+  border-color: #6ee7b7;
+  background: rgba(30, 41, 59, 0.9);
+}
+
+.mode-picker button:disabled {
+  cursor: default;
+  opacity: 0.35;
 }
 
 .motion-state strong {

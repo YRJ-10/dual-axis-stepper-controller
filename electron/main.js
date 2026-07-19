@@ -5,6 +5,7 @@ const { app, BrowserWindow, globalShortcut, ipcMain, screen } = require("electro
 const { SerialPort } = require("serialport");
 
 const STOP_SHORTCUT = "numsub";
+const MODE_COUNT = 11;
 
 let mainWindow = null;
 let overlayWindow = null;
@@ -184,7 +185,8 @@ function processSerialWriteQueue() {
 function queueSerialWrite(data) {
   return new Promise((resolve, reject) => {
     const item = { data, resolve, reject };
-    if (data.trim() === "STOP") {
+    const command = data.trim();
+    if (command === "STOP" || command.startsWith("SPEED ")) {
       const retainedWrites = [];
       serialWriteQueue.forEach((queuedItem) => {
         if (queuedItem.data.trim().startsWith("SPEED ")) {
@@ -195,11 +197,15 @@ function queueSerialWrite(data) {
         }
       });
       serialWriteQueue = retainedWrites;
-      serialWriteQueue.unshift(item);
+      if (command === "STOP") {
+        serialWriteQueue.unshift(item);
+      } else {
+        serialWriteQueue.push(item);
+      }
     } else {
       serialWriteQueue.push(item);
     }
-    diagnosticLog(`QUEUE ${data.trim()}`);
+    diagnosticLog(`QUEUE ${command}`);
     processSerialWriteQueue();
   });
 }
@@ -303,7 +309,7 @@ function createOverlayWindow() {
     movable: false,
     minimizable: false,
     maximizable: false,
-    focusable: false,
+    focusable: true,
     alwaysOnTop: true,
     skipTaskbar: true,
     hasShadow: false,
@@ -313,7 +319,7 @@ function createOverlayWindow() {
       nodeIntegration: false
     }
   });
-  overlayWindow.setIgnoreMouseEvents(true);
+  overlayWindow.setIgnoreMouseEvents(false);
   overlayWindow.setAlwaysOnTop(true, "floating");
   overlayWindow.loadFile(path.join(__dirname, "overlay.html"));
   overlayWindow.webContents.on("did-finish-load", () => {
@@ -431,6 +437,19 @@ ipcMain.on("overlay:update", (_event, state) => {
   if (overlayWindow && !overlayWindow.isDestroyed()) {
     overlayWindow.webContents.send("overlay:state", overlayState);
   }
+});
+
+ipcMain.handle("overlay:set-mode", async (_event, requestedMode) => {
+  const nextMode = Number(requestedMode);
+  if (!overlayState.connected || !activePort || !activePort.isOpen) {
+    throw new Error("Arduino belum terhubung");
+  }
+  if (!Number.isInteger(nextMode) || nextMode < 0 || nextMode >= MODE_COUNT) {
+    throw new Error("Mode tidak valid");
+  }
+
+  await queueSerialWrite(`MODE ${nextMode}\n`);
+  return { mode: nextMode };
 });
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();

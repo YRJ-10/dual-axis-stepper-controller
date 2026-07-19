@@ -1,9 +1,10 @@
 const MODE_COUNT = 11;
 const BAUD_RATE = 9600;
+const EXPECTED_FIRMWARE_ID = "MOTION_SAFE_1";
+const FIRMWARE_VERIFY_TIMEOUT_MS = 7000;
 const SPEED_MIN = 0;
 const SPEED_MAX = 100;
 const SPEED_STEP = 1;
-const SPEED_RAMP_INTERVAL_MS = 80;
 const serialBridge = window.electronSerial || null;
 const controlsBridge = window.electronControls || null;
 
@@ -54,22 +55,119 @@ let activeMode = null;
 let lastSentMode = null;
 let currentSpeed = 0;
 let sentSpeed = 0;
-let speedRampTimer = null;
 let speedLockEnabled = false;
 let globalMouseEnabled = false;
 let stopPending = false;
 let stopReleaseTimer = null;
+let firmwareVerified = false;
+let firmwareVerificationTimer = null;
+let firmwareVerificationFailed = false;
 
 function syncOverlayState() {
   if (!controlsBridge || typeof controlsBridge.updateOverlayState !== "function") {
     return;
   }
   controlsBridge.updateOverlayState({
-    connected: Boolean(port && writer),
+    connected: Boolean(port && writer && firmwareVerified),
     mode: activeMode,
-    speed: currentSpeed,
-    stopped: currentSpeed === 0
+    speed: sentSpeed,
+    stopped: sentSpeed === 0
   });
+}
+
+function clearFirmwareVerificationTimer() {
+  if (firmwareVerificationTimer !== null) {
+    clearTimeout(firmwareVerificationTimer);
+    firmwareVerificationTimer = null;
+  }
+}
+
+function updateControlAvailability() {
+  const isConnected = Boolean(port && writer);
+  const controllerReady = isConnected && firmwareVerified;
+
+  readButton.disabled = !controllerReady;
+  saveButton.disabled = !controllerReady;
+  loadButton.disabled = !controllerReady;
+  speedSlider.disabled = !controllerReady;
+  speedLockButton.disabled = !controllerReady;
+  potButton.disabled = !controllerReady;
+  stopButton.disabled = !isConnected;
+
+  document.querySelectorAll("[data-apply]").forEach((button) => {
+    button.disabled = !controllerReady;
+  });
+  document.querySelectorAll("[data-mode-select]").forEach((button) => {
+    button.disabled = !controllerReady;
+  });
+
+  if (controlsBridge) {
+    globalMouseButton.disabled = !controllerReady;
+    if (!controllerReady && globalMouseEnabled) {
+      setGlobalMouseControl(false);
+    }
+  }
+
+  const portLabel = serialBridge && port && port.path ? ` (${port.path})` : "";
+  connectionStatus.textContent = !isConnected
+    ? "Belum terhubung"
+    : firmwareVerified
+      ? `Terhubung ke Arduino${portLabel} · Firmware Verified`
+      : `Terhubung ke Arduino${portLabel} · Memverifikasi firmware`;
+  syncOverlayState();
+}
+
+function confirmFirmware(firmwareId) {
+  clearFirmwareVerificationTimer();
+  if (firmwareId !== EXPECTED_FIRMWARE_ID) {
+    firmwareVerified = false;
+    if (!firmwareVerificationFailed) {
+      firmwareVerificationFailed = true;
+      log(`Firmware Mismatch: ${firmwareId || "tidak diketahui"}`);
+    }
+    setCommandStatus("Firmware Mismatch", "error");
+    updateControlAvailability();
+    return;
+  }
+
+  const firstVerification = !firmwareVerified;
+  firmwareVerified = true;
+  firmwareVerificationFailed = false;
+  updateControlAvailability();
+  if (firstVerification) {
+    log("Firmware Verified");
+    setCommandStatus("Firmware Verified", "ok");
+    sendCommand("DUMP");
+  }
+}
+
+function beginFirmwareVerification() {
+  firmwareVerified = false;
+  firmwareVerificationFailed = false;
+  clearFirmwareVerificationTimer();
+  updateControlAvailability();
+  setCommandStatus("Memverifikasi firmware...");
+
+  firmwareVerificationTimer = setTimeout(() => {
+    firmwareVerificationTimer = null;
+    if (!port || !writer || firmwareVerified) {
+      return;
+    }
+    firmwareVerificationFailed = true;
+    log("Firmware Verification Failed");
+    setCommandStatus("Firmware Verification Failed", "error");
+    updateControlAvailability();
+  }, FIRMWARE_VERIFY_TIMEOUT_MS);
+
+  setTimeout(async () => {
+    if (!port || !writer || firmwareVerified) {
+      return;
+    }
+    sentSpeed = 0;
+    updateSpeedUi(0, "WEB");
+    await sendCommand("STOP");
+    await sendCommand("INFO");
+  }, 2500);
 }
 
 async function refreshElectronPorts() {
@@ -137,33 +235,17 @@ function buildUi() {
 function setConnectedState(isConnected) {
   connectButton.disabled = isConnected;
   disconnectButton.disabled = !isConnected;
-  readButton.disabled = !isConnected;
-  saveButton.disabled = !isConnected;
-  loadButton.disabled = !isConnected;
   if (serialBridge) {
     serialPortSelect.disabled = isConnected;
     refreshPortsButton.disabled = isConnected;
   }
-  if (controlsBridge) {
-    globalMouseButton.disabled = !isConnected;
-    if (!isConnected && globalMouseEnabled) {
-      setGlobalMouseControl(false);
-    }
-  }
-  document.querySelectorAll("[data-apply]").forEach((button) => {
-    button.disabled = !isConnected;
-  });
-  document.querySelectorAll("[data-mode-select]").forEach((button) => {
-    button.disabled = !isConnected;
-  });
-  const portLabel = serialBridge && port && port.path ? ` (${port.path})` : "";
-  connectionStatus.textContent = isConnected
-    ? `Terhubung ke Arduino${portLabel}`
-    : "Belum terhubung";
   if (!isConnected) {
+    clearFirmwareVerificationTimer();
+    firmwareVerified = false;
+    firmwareVerificationFailed = false;
     updateActiveMode(null);
   }
-  syncOverlayState();
+  updateControlAvailability();
 }
 
 function log(message) {
@@ -262,25 +344,8 @@ function updateSpeedUi(value, source = "WEB") {
   syncOverlayState();
 }
 
-function stopSpeedRamp() {
-  if (speedRampTimer !== null) {
-    clearInterval(speedRampTimer);
-    speedRampTimer = null;
-  }
-}
-
-function runSpeedRamp() {
-  if (sentSpeed === currentSpeed) {
-    stopSpeedRamp();
-    return;
-  }
-
-  sentSpeed += sentSpeed < currentSpeed ? SPEED_STEP : -SPEED_STEP;
-  sendCommand(`SPEED ${sentSpeed}`);
-}
-
 function setSpeedTarget(value) {
-  if (stopPending) {
+  if (stopPending || !firmwareVerified || !writer) {
     return;
   }
 
@@ -289,10 +354,9 @@ function setSpeedTarget(value) {
     return;
   }
 
+  sentSpeed = nextSpeed;
   updateSpeedUi(nextSpeed, "WEB");
-  if (speedRampTimer === null) {
-    speedRampTimer = setInterval(runSpeedRamp, SPEED_RAMP_INTERVAL_MS);
-  }
+  sendCommand(`SPEED ${sentSpeed}`);
 }
 
 function releaseStopPending() {
@@ -309,7 +373,6 @@ function requestStop() {
   }
 
   stopPending = true;
-  stopSpeedRamp();
   sentSpeed = 0;
   updateSpeedUi(0, "WEB");
   sendCommand("STOP");
@@ -368,7 +431,7 @@ async function connectSerial() {
       keepReading = true;
       setConnectedState(true);
       log(`Connected ${selectedPath}`);
-      setTimeout(() => sendCommand("DUMP"), 2500);
+      beginFirmwareVerification();
     } catch (error) {
       log(`Connect gagal: ${error.message}`);
     }
@@ -389,7 +452,7 @@ async function connectSerial() {
     readLoop();
     setConnectedState(true);
     log("Connected");
-    setTimeout(() => sendCommand("DUMP"), 2500);
+    beginFirmwareVerification();
   } catch (error) {
     log(`Connect gagal: ${error.message}`);
   }
@@ -397,7 +460,6 @@ async function connectSerial() {
 
 async function disconnectSerial() {
   keepReading = false;
-  stopSpeedRamp();
 
   if (serialBridge) {
     try {
@@ -469,6 +531,11 @@ function flushIncomingLines() {
       return;
     }
     const parts = cleanLine.split(/\s+/);
+    if (parts[0] === "FW") {
+      log(`< ${cleanLine}`);
+      confirmFirmware(parts[1] || "");
+      return;
+    }
     if (parts[0] === "OK" && parts[1] === "SET") {
       log(`< ${cleanLine}`);
       const mode = Number(parts[2]);
@@ -497,7 +564,6 @@ function flushIncomingLines() {
     }
     if (parts[0] === "OK" && parts[1] === "POT") {
       log(`< ${cleanLine}`);
-      stopSpeedRamp();
       setCommandStatus("Kontrol balik ke potensio", "ok");
       speedSource.textContent = "Potensio";
       return;
@@ -505,7 +571,6 @@ function flushIncomingLines() {
     if (parts[0] === "OK" && parts[1] === "STOP") {
       log(`< ${cleanLine}`);
       releaseStopPending();
-      stopSpeedRamp();
       sentSpeed = 0;
       updateSpeedUi(0, "WEB");
       setCommandStatus("Stop", "ok");
@@ -534,11 +599,12 @@ function flushIncomingLines() {
     if (parts[0] === "SPEED") {
       const source = parts[1] === "POT" ? "POT" : "WEB";
       if (source === "POT") {
-        stopSpeedRamp();
+        sentSpeed = 0;
         updateSpeedUi(0, source);
       } else {
         sentSpeed = clampSpeed(Math.round(Number(parts[2]) / 50));
         speedSource.textContent = "Web UI";
+        syncOverlayState();
       }
       log(`< ${cleanLine}`);
       return;
@@ -585,7 +651,6 @@ if (serialBridge) {
       port = null;
       writer = null;
       keepReading = false;
-      stopSpeedRamp();
       setConnectedState(false);
       log("Port serial terputus");
     }
@@ -646,7 +711,6 @@ stopButton.addEventListener("click", () => {
   requestStop();
 });
 potButton.addEventListener("click", () => {
-  stopSpeedRamp();
   sendCommand("POT");
 });
 window.addEventListener("wheel", (event) => {
