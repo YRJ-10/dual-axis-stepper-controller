@@ -123,6 +123,30 @@ h2 {
   gap: 10px;
 }
 
+.serial-port-controls {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+}
+
+.serial-port-controls[hidden] {
+  display: none;
+}
+
+.serial-port-controls label {
+  min-width: 210px;
+}
+
+#refreshPortsButton {
+  border-color: var(--line);
+  background: #ffffff;
+  color: var(--ink);
+}
+
+#refreshPortsButton:hover:not(:disabled) {
+  background: #eef2f6;
+}
+
 .control-strip {
   align-items: center;
   border-top: 0;
@@ -266,6 +290,18 @@ h2 {
 }
 
 #speedLockButton.locked {
+  background: #0f766e;
+}
+
+#globalMouseButton {
+  background: #334155;
+}
+
+#globalMouseButton:hover:not(:disabled) {
+  background: #1f2937;
+}
+
+#globalMouseButton.enabled {
   background: #0f766e;
 }
 
@@ -424,6 +460,16 @@ tr.active-row .mode-badge {
   .control-strip button,
   .control-strip label {
     flex: 1 1 150px;
+  }
+
+  .serial-port-controls {
+    width: 100%;
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .serial-port-controls label {
+    flex: 1 1 220px;
   }
 
   .mode-picker {

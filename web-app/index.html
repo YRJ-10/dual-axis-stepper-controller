@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Dual Axis Stepper Tuner</title>
-    <link rel="stylesheet" href="./style.css?v=20260716-mode-buttons">
+    <link rel="stylesheet" href="./style.css?v=20260718-electron-phase3">
   </head>
   <body>
     <main class="app-shell">
@@ -18,6 +18,13 @@
           <strong id="currentActiveMode">-</strong>
         </div>
         <div class="actions">
+          <div id="desktopPortControls" class="serial-port-controls" hidden>
+            <label for="serialPortSelect">
+              <span>Port COM</span>
+              <select id="serialPortSelect" aria-label="Port COM"></select>
+            </label>
+            <button id="refreshPortsButton" type="button">Refresh COM</button>
+          </div>
           <button id="connectButton" type="button">Connect</button>
           <button id="disconnectButton" type="button" disabled>Disconnect</button>
         </div>
@@ -42,6 +49,7 @@
         </div>
         <input id="speedSlider" type="range" min="0" max="100" step="1" value="0">
         <div class="speed-actions">
+          <button id="globalMouseButton" type="button" aria-pressed="false" hidden>Global Mouse OFF</button>
           <button id="speedLockButton" type="button" aria-pressed="false">Lock Slider</button>
           <button id="stopButton" type="button">STOP</button>
           <button id="potButton" type="button">Potensio</button>
@@ -74,6 +82,6 @@
       </section>
     </main>
 
-    <script src="./app.js?v=20260716-mode-buttons"></script>
+    <script src="./app.js?v=20260718-electron-phase3"></script>
   </body>
 </html>

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Controller Monitor</title>
+    <link rel="stylesheet" href="./overlay.css">
+  </head>
+  <body class="offline">
+    <main class="monitor" aria-label="Controller monitor">
+      <header>
+        <span class="connection-dot" aria-hidden="true"></span>
+        <span id="connectionLabel">OFFLINE</span>
+      </header>
+      <section class="readings">
+        <div>
+          <span>MODE</span>
+          <strong id="modeValue">-</strong>
+        </div>
+        <div>
+          <span>SPEED</span>
+          <strong id="speedValue">0</strong>
+        </div>
+        <div class="motion-state">
+          <span>STATUS</span>
+          <strong id="runState">STOP</strong>
+        </div>
+      </section>
+    </main>
+    <script src="./overlay.js"></script>
+  </body>
+</html>

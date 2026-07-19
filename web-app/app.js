@@ -4,6 +4,8 @@ const SPEED_MIN = 0;
 const SPEED_MAX = 100;
 const SPEED_STEP = 1;
 const SPEED_RAMP_INTERVAL_MS = 80;
+const serialBridge = window.electronSerial || null;
+const controlsBridge = window.electronControls || null;
 
 const defaultModes = [
   [1000, 2000, 3, 150, 150],
@@ -22,6 +24,9 @@ const defaultModes = [
 const connectButton = document.querySelector("#connectButton");
 const disconnectButton = document.querySelector("#disconnectButton");
 const connectionStatus = document.querySelector("#connectionStatus");
+const desktopPortControls = document.querySelector("#desktopPortControls");
+const serialPortSelect = document.querySelector("#serialPortSelect");
+const refreshPortsButton = document.querySelector("#refreshPortsButton");
 const currentActiveMode = document.querySelector("#currentActiveMode");
 const modeButtonGroup = document.querySelector("#modeButtonGroup");
 const readButton = document.querySelector("#readButton");
@@ -33,6 +38,7 @@ const speedPanel = document.querySelector("#speedPanel");
 const speedValue = document.querySelector("#speedValue");
 const speedSource = document.querySelector("#speedSource");
 const speedSlider = document.querySelector("#speedSlider");
+const globalMouseButton = document.querySelector("#globalMouseButton");
 const speedLockButton = document.querySelector("#speedLockButton");
 const stopButton = document.querySelector("#stopButton");
 const potButton = document.querySelector("#potButton");
@@ -50,6 +56,56 @@ let currentSpeed = 0;
 let sentSpeed = 0;
 let speedRampTimer = null;
 let speedLockEnabled = false;
+let globalMouseEnabled = false;
+let stopPending = false;
+let stopReleaseTimer = null;
+
+function syncOverlayState() {
+  if (!controlsBridge || typeof controlsBridge.updateOverlayState !== "function") {
+    return;
+  }
+  controlsBridge.updateOverlayState({
+    connected: Boolean(port && writer),
+    mode: activeMode,
+    speed: currentSpeed,
+    stopped: currentSpeed === 0
+  });
+}
+
+async function refreshElectronPorts() {
+  if (!serialBridge) {
+    return [];
+  }
+
+  const ports = await serialBridge.listPorts();
+  const selectedPath = serialPortSelect.value
+    || localStorage.getItem("lastSerialPort")
+    || "";
+  serialPortSelect.replaceChildren();
+
+  if (ports.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "Tidak ada port COM";
+    serialPortSelect.append(option);
+    connectButton.disabled = true;
+    return ports;
+  }
+
+  ports.forEach((item) => {
+    const option = document.createElement("option");
+    const details = item.manufacturer ? ` - ${item.manufacturer}` : "";
+    option.value = item.path;
+    option.textContent = `${item.path}${details}`;
+    serialPortSelect.append(option);
+  });
+
+  if (ports.some((item) => item.path === selectedPath)) {
+    serialPortSelect.value = selectedPath;
+  }
+  connectButton.disabled = false;
+  return ports;
+}
 
 function buildUi() {
   for (let mode = 0; mode < MODE_COUNT; mode++) {
@@ -84,16 +140,30 @@ function setConnectedState(isConnected) {
   readButton.disabled = !isConnected;
   saveButton.disabled = !isConnected;
   loadButton.disabled = !isConnected;
+  if (serialBridge) {
+    serialPortSelect.disabled = isConnected;
+    refreshPortsButton.disabled = isConnected;
+  }
+  if (controlsBridge) {
+    globalMouseButton.disabled = !isConnected;
+    if (!isConnected && globalMouseEnabled) {
+      setGlobalMouseControl(false);
+    }
+  }
   document.querySelectorAll("[data-apply]").forEach((button) => {
     button.disabled = !isConnected;
   });
   document.querySelectorAll("[data-mode-select]").forEach((button) => {
     button.disabled = !isConnected;
   });
-  connectionStatus.textContent = isConnected ? "Terhubung ke Arduino" : "Belum terhubung";
+  const portLabel = serialBridge && port && port.path ? ` (${port.path})` : "";
+  connectionStatus.textContent = isConnected
+    ? `Terhubung ke Arduino${portLabel}`
+    : "Belum terhubung";
   if (!isConnected) {
     updateActiveMode(null);
   }
+  syncOverlayState();
 }
 
 function log(message) {
@@ -177,6 +247,7 @@ function updateActiveMode(mode) {
   document.querySelectorAll("#modeTableBody tr").forEach((row) => {
     row.classList.toggle("active-row", Number(row.dataset.mode) === mode);
   });
+  syncOverlayState();
 }
 
 function clampSpeed(value) {
@@ -188,6 +259,7 @@ function updateSpeedUi(value, source = "WEB") {
   speedSlider.value = String(currentSpeed);
   speedValue.textContent = String(currentSpeed);
   speedSource.textContent = source === "POT" ? "Potensio" : "Web UI";
+  syncOverlayState();
 }
 
 function stopSpeedRamp() {
@@ -208,6 +280,10 @@ function runSpeedRamp() {
 }
 
 function setSpeedTarget(value) {
+  if (stopPending) {
+    return;
+  }
+
   const nextSpeed = clampSpeed(Number(value) || 0);
   if (nextSpeed === currentSpeed && speedSource.textContent === "Web UI") {
     return;
@@ -219,6 +295,27 @@ function setSpeedTarget(value) {
   }
 }
 
+function releaseStopPending() {
+  stopPending = false;
+  if (stopReleaseTimer !== null) {
+    clearTimeout(stopReleaseTimer);
+    stopReleaseTimer = null;
+  }
+}
+
+function requestStop() {
+  if (stopPending) {
+    return;
+  }
+
+  stopPending = true;
+  stopSpeedRamp();
+  sentSpeed = 0;
+  updateSpeedUi(0, "WEB");
+  sendCommand("STOP");
+  stopReleaseTimer = setTimeout(releaseStopPending, 1500);
+}
+
 function setSpeedLock(enabled) {
   speedLockEnabled = enabled;
   speedPanel.classList.toggle("locked", enabled);
@@ -228,7 +325,56 @@ function setSpeedLock(enabled) {
   setCommandStatus(enabled ? "Slider Lock ON" : "Slider Lock OFF", enabled ? "ok" : "");
 }
 
+async function setGlobalMouseControl(enabled) {
+  if (!controlsBridge) {
+    return;
+  }
+
+  try {
+    const result = await controlsBridge.setGlobalMouseEnabled(enabled);
+    globalMouseEnabled = result.enabled;
+    globalMouseButton.classList.toggle("enabled", globalMouseEnabled);
+    globalMouseButton.setAttribute("aria-pressed", globalMouseEnabled ? "true" : "false");
+    globalMouseButton.textContent = globalMouseEnabled
+      ? "Global Mouse ON"
+      : "Global Mouse OFF";
+    setCommandStatus(
+      globalMouseEnabled && result.stopShortcutEnabled
+        ? "Global Mouse + Numpad - aktif"
+        : "Global Mouse nonaktif",
+      globalMouseEnabled ? "ok" : ""
+    );
+  } catch (error) {
+    log(`Global Mouse gagal: ${error.message}`);
+    setCommandStatus("Global Mouse gagal", "error");
+  }
+}
+
 async function connectSerial() {
+  if (serialBridge) {
+    try {
+      if (!serialPortSelect.value) {
+        await refreshElectronPorts();
+      }
+      const selectedPath = serialPortSelect.value;
+      if (!selectedPath) {
+        throw new Error("Tidak ada port COM yang terdeteksi");
+      }
+      await serialBridge.open({ path: selectedPath, baudRate: BAUD_RATE });
+      localStorage.setItem("lastSerialPort", selectedPath);
+      incomingBuffer = "";
+      port = { path: selectedPath, desktop: true };
+      writer = { desktop: true };
+      keepReading = true;
+      setConnectedState(true);
+      log(`Connected ${selectedPath}`);
+      setTimeout(() => sendCommand("DUMP"), 2500);
+    } catch (error) {
+      log(`Connect gagal: ${error.message}`);
+    }
+    return;
+  }
+
   if (!("serial" in navigator)) {
     log("Browser tidak support Web Serial. Pakai Chrome atau Edge.");
     return;
@@ -252,6 +398,20 @@ async function connectSerial() {
 async function disconnectSerial() {
   keepReading = false;
   stopSpeedRamp();
+
+  if (serialBridge) {
+    try {
+      await serialBridge.close();
+      incomingBuffer = "";
+      port = null;
+      writer = null;
+      setConnectedState(false);
+      log("Disconnected");
+    } catch (error) {
+      log(`Disconnect gagal: ${error.message}`);
+    }
+    return;
+  }
 
   try {
     if (reader) {
@@ -344,6 +504,7 @@ function flushIncomingLines() {
     }
     if (parts[0] === "OK" && parts[1] === "STOP") {
       log(`< ${cleanLine}`);
+      releaseStopPending();
       stopSpeedRamp();
       sentSpeed = 0;
       updateSpeedUi(0, "WEB");
@@ -393,12 +554,42 @@ async function sendCommand(command) {
   }
 
   try {
+    if (serialBridge) {
+      const result = await serialBridge.write(`${command}\n`);
+      if (result && result.canceled) {
+        return;
+      }
+      log(`> ${command}`);
+      return;
+    }
+
     const encoder = new TextEncoder();
     await writer.write(encoder.encode(`${command}\n`));
     log(`> ${command}`);
   } catch (error) {
     log(`Write error: ${error.message}`);
   }
+}
+
+if (serialBridge) {
+  serialBridge.onData((data) => {
+    incomingBuffer += data;
+    flushIncomingLines();
+  });
+  serialBridge.onStatus((status) => {
+    if (status.type === "error") {
+      log(`Serial error: ${status.message}`);
+      return;
+    }
+    if (status.type === "closed" && port) {
+      port = null;
+      writer = null;
+      keepReading = false;
+      stopSpeedRamp();
+      setConnectedState(false);
+      log("Port serial terputus");
+    }
+  });
 }
 
 async function sendModeConfig(mode) {
@@ -417,6 +608,15 @@ async function sendModeConfig(mode) {
 
 connectButton.addEventListener("click", connectSerial);
 disconnectButton.addEventListener("click", disconnectSerial);
+refreshPortsButton.addEventListener("click", async () => {
+  try {
+    await refreshElectronPorts();
+    setCommandStatus("Daftar COM diperbarui", "ok");
+  } catch (error) {
+    log(`Refresh COM gagal: ${error.message}`);
+    setCommandStatus("Refresh COM gagal", "error");
+  }
+});
 readButton.addEventListener("click", () => sendCommand("DUMP"));
 saveButton.addEventListener("click", () => sendCommand("SAVE"));
 loadButton.addEventListener("click", () => sendCommand("LOAD"));
@@ -439,11 +639,11 @@ speedPanel.addEventListener("wheel", (event) => {
 speedLockButton.addEventListener("click", () => {
   setSpeedLock(!speedLockEnabled);
 });
+globalMouseButton.addEventListener("click", () => {
+  setGlobalMouseControl(!globalMouseEnabled);
+});
 stopButton.addEventListener("click", () => {
-  stopSpeedRamp();
-  sentSpeed = 0;
-  updateSpeedUi(0, "WEB");
-  sendCommand("STOP");
+  requestStop();
 });
 potButton.addEventListener("click", () => {
   stopSpeedRamp();
@@ -464,10 +664,7 @@ window.addEventListener("mousedown", (event) => {
   }
 
   event.preventDefault();
-  stopSpeedRamp();
-  sentSpeed = 0;
-  updateSpeedUi(0, "WEB");
-  sendCommand("STOP");
+  requestStop();
 });
 window.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && speedLockEnabled) {
@@ -477,10 +674,7 @@ window.addEventListener("keydown", (event) => {
 
   if (event.code === "Space" && speedLockEnabled) {
     event.preventDefault();
-    stopSpeedRamp();
-    sentSpeed = 0;
-    updateSpeedUi(0, "WEB");
-    sendCommand("STOP");
+    requestStop();
   }
 });
 clearLogButton.addEventListener("click", () => {
@@ -496,3 +690,24 @@ modeTableBody.addEventListener("click", (event) => {
 
 buildUi();
 setConnectedState(false);
+if (serialBridge) {
+  desktopPortControls.hidden = false;
+  refreshElectronPorts().catch((error) => {
+    log(`Daftar COM gagal: ${error.message}`);
+  });
+}
+if (controlsBridge) {
+  globalMouseButton.hidden = false;
+  controlsBridge.onGlobalMouseGesture((gesture) => {
+    if (!globalMouseEnabled) {
+      return;
+    }
+    if (gesture.type === "speed") {
+      setSpeedTarget(Number(speedSlider.value) + gesture.delta * SPEED_STEP);
+      return;
+    }
+    if (gesture.type === "stop") {
+      requestStop();
+    }
+  });
+}

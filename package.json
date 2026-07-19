@@ -1,0 +1,49 @@
+{
+  "name": "dual-axis-stepper-controller",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Desktop controller for the dual-axis stepper Arduino project",
+  "main": "electron/main.js",
+  "scripts": {
+    "build:native-helper": "powershell -NoProfile -ExecutionPolicy Bypass -File native-helper/build.ps1",
+    "start": "npm run build:native-helper && electron .",
+    "build:portable": "npm run build:native-helper && electron-builder --win portable --x64"
+  },
+  "dependencies": {
+    "serialport": "13.0.0"
+  },
+  "devDependencies": {
+    "electron": "43.1.1",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.yrj.dualaxissteppercontroller",
+    "productName": "Dual Axis Stepper Controller",
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/@serialport/**",
+      "node_modules/serialport/**"
+    ],
+    "extraResources": [
+      {
+        "from": "native-helper/bin/GlobalMouseHook.exe",
+        "to": "native-helper/GlobalMouseHook.exe"
+      }
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "web-app/**/*",
+      "appicon.png",
+      "package.json"
+    ],
+    "win": {
+      "icon": "appicon.png",
+      "target": "portable",
+      "artifactName": "Dual-Axis-Stepper-Controller-${version}-portable.${ext}",
+      "requestedExecutionLevel": "asInvoker"
+    }
+  }
+}
