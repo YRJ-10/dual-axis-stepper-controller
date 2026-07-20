@@ -26,12 +26,14 @@
 #define OLED_RETRY_INTERVAL_MS 2000
 #define OLED_REFRESH_INTERVAL_MS 1000
 #define OLED_REINIT_INTERVAL_MS 5000
-#define FIRMWARE_ID "MOTION_SAFE_1"
+#define FIRMWARE_ID "MOTION_SAFE_2"
 #define SPEED_RAMP_INTERVAL_MS 2
 #define SPEED_RAMP_STEP 2
 #define MOTION_TICK_HZ 40000UL
+#define MOTION_TIMER_HZ (F_CPU / 8UL)
 #define MOTION_MAX_STEP_HZ 18000U
 #define MOTION_TARGET_UPDATE_US 500UL
+#define MOTION_IDLE_HALF_TICKS 2000U
 
 #define STEP1_MASK _BV(PD5)
 #define DIR1_MASK _BV(PD2)
@@ -105,9 +107,9 @@ volatile int stepCount2 = 0;
 volatile bool dirState1 = HIGH;
 volatile bool dirState2 = HIGH;
 volatile uint16_t targetStepHz1 = 0;
-volatile uint16_t targetStepHz2 = 0;
+volatile uint16_t targetHalfPeriodTicks1 = 0;
+volatile uint16_t targetHalfPeriodTicks2 = 0;
 volatile uint16_t phaseAccumulator1 = 0;
-volatile uint16_t phaseAccumulator2 = 0;
 volatile bool stepPulseHigh1 = false;
 volatile bool stepPulseHigh2 = false;
 volatile bool directionChangePending1 = false;
@@ -149,9 +151,18 @@ void setup() {
 
   cli();
   TCCR1A = 0;
-  TCCR1B = (1 << WGM12) | (1 << CS10);
-  OCR1A = (F_CPU / MOTION_TICK_HZ) - 1;
-  TIMSK1 |= (1 << OCIE1A);
+  TCCR1B = (1 << WGM12) | (1 << CS11);
+  TCNT1 = 0;
+  OCR1A = MOTION_IDLE_HALF_TICKS - 1;
+  TIFR1 = (1 << OCF1A);
+  TIMSK1 = (1 << OCIE1A);
+
+  TCCR2A = (1 << WGM21);
+  TCCR2B = (1 << CS21);
+  TCNT2 = 0;
+  OCR2A = (F_CPU / 8UL / MOTION_TICK_HZ) - 1;
+  TIFR2 = (1 << OCF2A);
+  TIMSK2 = (1 << OCIE2A);
   sei();
 }
 
@@ -283,6 +294,25 @@ int easedMotor2Multiplier(int multiplier, int position, int totalSteps, int easi
   return 1 + ((long)(multiplier - 1) * easingPosition / easingSteps);
 }
 
+uint16_t halfPeriodTicksFromHz(unsigned long requestedHz) {
+  if (requestedHz == 0) {
+    return 0;
+  }
+  if (requestedHz > MOTION_MAX_STEP_HZ) {
+    requestedHz = MOTION_MAX_STEP_HZ;
+  }
+
+  unsigned long halfPeriodTicks =
+    (MOTION_TIMER_HZ + requestedHz) / (requestedHz * 2UL);
+  if (halfPeriodTicks > 65535UL) {
+    return 65535U;
+  }
+  if (halfPeriodTicks < 2UL) {
+    return 2U;
+  }
+  return (uint16_t)halfPeriodTicks;
+}
+
 void updateMotionTargets() {
   unsigned long now = micros();
   if (now - lastMotionTargetUs < MOTION_TARGET_UPDATE_US) {
@@ -335,29 +365,37 @@ void updateMotionTargets() {
   uint16_t nextHz1 = requestedHz1 > MOTION_MAX_STEP_HZ
     ? MOTION_MAX_STEP_HZ
     : (uint16_t)requestedHz1;
-  uint16_t nextHz2 = requestedHz2 > MOTION_MAX_STEP_HZ
-    ? MOTION_MAX_STEP_HZ
-    : (uint16_t)requestedHz2;
+  uint16_t nextHalfPeriod1 = halfPeriodTicksFromHz(nextHz1);
+  uint16_t nextHalfPeriod2 = halfPeriodTicksFromHz(requestedHz2);
 
   noInterrupts();
   targetStepHz1 = nextHz1;
-  targetStepHz2 = nextHz2;
+  targetHalfPeriodTicks1 = nextHalfPeriod1;
+  targetHalfPeriodTicks2 = nextHalfPeriod2;
   interrupts();
+}
+
+void disableMotor2StepOutput() {
+  if (stepPulseHigh2) {
+    TCCR1C = (1 << FOC1A);
+    stepPulseHigh2 = false;
+  }
+  TCCR1A &= ~(1 << COM1A0);
+  PORTB &= ~STEP2_MASK;
 }
 
 void stopMotionImmediately() {
   noInterrupts();
   baseSpeed = 0;
   targetStepHz1 = 0;
-  targetStepHz2 = 0;
+  targetHalfPeriodTicks1 = 0;
+  targetHalfPeriodTicks2 = 0;
   phaseAccumulator1 = 0;
-  phaseAccumulator2 = 0;
   stepPulseHigh1 = false;
-  stepPulseHigh2 = false;
   directionChangePending1 = false;
   directionChangePending2 = false;
+  disableMotor2StepOutput();
   PORTD &= ~STEP1_MASK;
-  PORTB &= ~STEP2_MASK;
   interrupts();
 }
 
@@ -731,11 +769,9 @@ void uppercase(char *text) {
   }
 }
 
-ISR(TIMER1_COMPA_vect) {
+ISR(TIMER2_COMPA_vect) {
   bool motor1WasHigh = stepPulseHigh1;
-  bool motor2WasHigh = stepPulseHigh2;
   uint16_t localTargetHz1 = targetStepHz1;
-  uint16_t localTargetHz2 = targetStepHz2;
 
   if (motor1WasHigh) {
     PORTD &= ~STEP1_MASK;
@@ -750,20 +786,6 @@ ISR(TIMER1_COMPA_vect) {
       directionChangePending1 = false;
     }
   }
-  if (motor2WasHigh) {
-    PORTB &= ~STEP2_MASK;
-    stepPulseHigh2 = false;
-    if (directionChangePending2) {
-      dirState2 = !dirState2;
-      if (dirState2) {
-        PORTB |= DIR2_MASK;
-      } else {
-        PORTB &= ~DIR2_MASK;
-      }
-      directionChangePending2 = false;
-    }
-  }
-
   if (localTargetHz1 == 0 || activeSteps1 <= 0) {
     phaseAccumulator1 = 0;
   } else {
@@ -779,33 +801,80 @@ ISR(TIMER1_COMPA_vect) {
         directionChangePending1 = true;
         if (activeEasing > 0) {
           uint16_t easedHz1 = localTargetHz1 >> 2;
-          uint16_t easedHz2 = localTargetHz2 >> 2;
           targetStepHz1 = easedHz1 > 0 ? easedHz1 : 1;
-          targetStepHz2 = easedHz2 > 0 ? easedHz2 : 1;
+          uint16_t localHalfPeriod1 = targetHalfPeriodTicks1;
+          if (localHalfPeriod1 > 0) {
+            unsigned long easedHalfPeriod1 = (unsigned long)localHalfPeriod1 * 4UL;
+            targetHalfPeriodTicks1 = easedHalfPeriod1 > 65535UL
+              ? 65535U
+              : (uint16_t)easedHalfPeriod1;
+          }
+          uint16_t localHalfPeriod2 = targetHalfPeriodTicks2;
+          if (localHalfPeriod2 > 0) {
+            unsigned long easedHalfPeriod2 = (unsigned long)localHalfPeriod2 * 4UL;
+            targetHalfPeriodTicks2 = easedHalfPeriod2 > 65535UL
+              ? 65535U
+              : (uint16_t)easedHalfPeriod2;
+          }
         }
         phaseAccumulator1 = 0;
       }
     }
   }
+}
 
-  if (localTargetHz2 == 0 || activeSteps2 <= 0) {
-    phaseAccumulator2 = 0;
-  } else {
-    phaseAccumulator2 += localTargetHz2;
-    if (!motor2WasHigh && phaseAccumulator2 >= MOTION_TICK_HZ) {
-      phaseAccumulator2 -= MOTION_TICK_HZ;
-      PORTB |= STEP2_MASK;
-      stepPulseHigh2 = true;
-      stepCount2++;
+ISR(TIMER1_COMPA_vect) {
+  bool outputEnabled = (TCCR1A & (1 << COM1A0)) != 0;
+  if (outputEnabled) {
+    stepPulseHigh2 = !stepPulseHigh2;
+  }
 
-      if (stepCount2 >= activeSteps2) {
-        stepCount2 = 0;
-        directionChangePending2 = true;
-        if (activeEasing2 > 0) {
-          targetStepHz2 = targetStepHz1 > 0 ? targetStepHz1 : 1;
-        }
-        phaseAccumulator2 = 0;
+  uint16_t localHalfPeriod = targetHalfPeriodTicks2;
+  if (localHalfPeriod == 0 || activeSteps2 <= 0) {
+    disableMotor2StepOutput();
+    if (directionChangePending2) {
+      dirState2 = !dirState2;
+      if (dirState2) {
+        PORTB |= DIR2_MASK;
+      } else {
+        PORTB &= ~DIR2_MASK;
       }
+      directionChangePending2 = false;
+    }
+    OCR1A = MOTION_IDLE_HALF_TICKS - 1;
+    return;
+  }
+
+  OCR1A = localHalfPeriod - 1;
+  if (!outputEnabled) {
+    PORTB &= ~STEP2_MASK;
+    stepPulseHigh2 = false;
+    TCCR1A |= (1 << COM1A0);
+    return;
+  }
+
+  if (!stepPulseHigh2) {
+    if (directionChangePending2) {
+      dirState2 = !dirState2;
+      if (dirState2) {
+        PORTB |= DIR2_MASK;
+      } else {
+        PORTB &= ~DIR2_MASK;
+      }
+      directionChangePending2 = false;
+    }
+    return;
+  }
+
+  stepCount2++;
+  if (stepCount2 >= activeSteps2) {
+    stepCount2 = 0;
+    directionChangePending2 = true;
+    if (activeEasing2 > 0) {
+      uint16_t localHalfPeriod1 = targetHalfPeriodTicks1;
+      targetHalfPeriodTicks2 = localHalfPeriod1 > 0
+        ? localHalfPeriod1
+        : 65535U;
     }
   }
 }
