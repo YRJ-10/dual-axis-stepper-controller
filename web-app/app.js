@@ -1,6 +1,6 @@
 const MODE_COUNT = 11;
 const BAUD_RATE = 9600;
-const EXPECTED_FIRMWARE_ID = "MOTION_SAFE_2";
+const EXPECTED_FIRMWARE_ID = "MOTION_SAFE_4";
 const FIRMWARE_VERIFY_TIMEOUT_MS = 7000;
 const SPEED_MIN = 0;
 const SPEED_MAX = 100;
@@ -206,19 +206,36 @@ async function refreshElectronPorts() {
 }
 
 function buildUi() {
+  const independentGroup = document.createElement("div");
+  independentGroup.className = "mode-cluster mode-cluster-independent";
+  independentGroup.innerHTML = '<span class="mode-cluster-label">Independen</span><div class="mode-cluster-buttons"></div>';
+
+  const coupledGroup = document.createElement("div");
+  coupledGroup.className = "mode-cluster mode-cluster-coupled";
+  coupledGroup.innerHTML = '<span class="mode-cluster-label">Coupled</span><div class="mode-cluster-buttons"></div>';
+
+  modeButtonGroup.append(independentGroup, coupledGroup);
+
   for (let mode = 0; mode < MODE_COUNT; mode++) {
+    const isCoupled = mode >= 6;
     const modeButton = document.createElement("button");
     modeButton.type = "button";
     modeButton.className = "mode-select-button";
     modeButton.dataset.modeSelect = String(mode);
     modeButton.textContent = String(mode);
-    modeButton.title = `Aktifkan Mode ${mode}`;
+    modeButton.classList.add(isCoupled ? "coupled" : "independent");
+    modeButton.title = `Aktifkan Mode ${mode} (${isCoupled ? "Coupled" : "Independen"})`;
     modeButton.setAttribute("aria-pressed", "false");
     modeButton.disabled = true;
-    modeButtonGroup.append(modeButton);
+    const targetGroup = isCoupled ? coupledGroup : independentGroup;
+    targetGroup.querySelector(".mode-cluster-buttons").append(modeButton);
 
     const row = document.createElement("tr");
     row.dataset.mode = String(mode);
+    row.classList.add(isCoupled ? "coupled-mode-row" : "independent-mode-row");
+    if (mode === 6) {
+      row.classList.add("mode-group-start");
+    }
     row.innerHTML = `
       <td><span class="mode-badge">${mode}</span></td>
       <td><input data-field="steps1" type="number" min="1" max="30000" step="1" value="${defaultModes[mode][0]}"></td>

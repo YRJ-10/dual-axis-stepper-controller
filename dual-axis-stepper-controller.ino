@@ -26,7 +26,7 @@
 #define OLED_RETRY_INTERVAL_MS 2000
 #define OLED_REFRESH_INTERVAL_MS 1000
 #define OLED_REINIT_INTERVAL_MS 5000
-#define FIRMWARE_ID "MOTION_SAFE_2"
+#define FIRMWARE_ID "MOTION_SAFE_4"
 #define SPEED_RAMP_INTERVAL_MS 2
 #define SPEED_RAMP_STEP 2
 #define MOTION_TICK_HZ 40000UL
@@ -107,13 +107,14 @@ volatile int stepCount2 = 0;
 volatile bool dirState1 = HIGH;
 volatile bool dirState2 = HIGH;
 volatile uint16_t targetStepHz1 = 0;
-volatile uint16_t targetHalfPeriodTicks1 = 0;
+volatile uint16_t targetMotor2EasingHalfPeriodTicks = 0;
 volatile uint16_t targetHalfPeriodTicks2 = 0;
 volatile uint16_t phaseAccumulator1 = 0;
 volatile bool stepPulseHigh1 = false;
 volatile bool stepPulseHigh2 = false;
 volatile bool directionChangePending1 = false;
 volatile bool directionChangePending2 = false;
+volatile bool motor2CoupledToMotor1 = false;
 
 char serialBuffer[SERIAL_BUFFER_SIZE];
 byte serialIndex = 0;
@@ -328,6 +329,7 @@ void updateMotionTargets() {
   int localEasing2;
   int localStepCount1;
   int localStepCount2;
+  bool localMotor2Coupled;
 
   noInterrupts();
   localBaseSpeed = baseSpeed;
@@ -338,11 +340,14 @@ void updateMotionTargets() {
   localEasing2 = activeEasing2;
   localStepCount1 = stepCount1;
   localStepCount2 = stepCount2;
+  localMotor2Coupled = motor2CoupledToMotor1;
   interrupts();
 
   unsigned long requestedHz1 = 0;
   unsigned long requestedHz2 = 0;
+  unsigned long baseRequestedHz = 0;
   if (localBaseSpeed > 0 && localSteps1 > 0) {
+    baseRequestedHz = (unsigned long)localBaseSpeed * 2UL;
     int effectiveBase = easedBaseSpeed(
       localBaseSpeed,
       localStepCount1,
@@ -358,19 +363,26 @@ void updateMotionTargets() {
         localSteps2,
         localEasing2
       );
-      requestedHz2 = requestedHz1 * (unsigned long)effectiveMultiplier;
+      unsigned long motor2BaseHz = localMotor2Coupled
+        ? requestedHz1
+        : baseRequestedHz;
+      requestedHz2 = motor2BaseHz * (unsigned long)effectiveMultiplier;
     }
   }
 
   uint16_t nextHz1 = requestedHz1 > MOTION_MAX_STEP_HZ
     ? MOTION_MAX_STEP_HZ
     : (uint16_t)requestedHz1;
-  uint16_t nextHalfPeriod1 = halfPeriodTicksFromHz(nextHz1);
+  unsigned long motor2EasingReferenceHz = localMotor2Coupled
+    ? requestedHz1
+    : baseRequestedHz;
+  uint16_t nextMotor2EasingHalfPeriod =
+    halfPeriodTicksFromHz(motor2EasingReferenceHz);
   uint16_t nextHalfPeriod2 = halfPeriodTicksFromHz(requestedHz2);
 
   noInterrupts();
   targetStepHz1 = nextHz1;
-  targetHalfPeriodTicks1 = nextHalfPeriod1;
+  targetMotor2EasingHalfPeriodTicks = nextMotor2EasingHalfPeriod;
   targetHalfPeriodTicks2 = nextHalfPeriod2;
   interrupts();
 }
@@ -388,7 +400,7 @@ void stopMotionImmediately() {
   noInterrupts();
   baseSpeed = 0;
   targetStepHz1 = 0;
-  targetHalfPeriodTicks1 = 0;
+  targetMotor2EasingHalfPeriodTicks = 0;
   targetHalfPeriodTicks2 = 0;
   phaseAccumulator1 = 0;
   stepPulseHigh1 = false;
@@ -616,6 +628,7 @@ void applyModeConfig(int targetMode, bool resetCounters) {
   activeMultiplier2 = config.multiplier2;
   activeEasing = config.easing;
   activeEasing2 = config.easing2;
+  motor2CoupledToMotor1 = targetMode >= 6;
   if (resetCounters) {
     stepCount1 = 0;
     stepCount2 = 0;
@@ -802,19 +815,14 @@ ISR(TIMER2_COMPA_vect) {
         if (activeEasing > 0) {
           uint16_t easedHz1 = localTargetHz1 >> 2;
           targetStepHz1 = easedHz1 > 0 ? easedHz1 : 1;
-          uint16_t localHalfPeriod1 = targetHalfPeriodTicks1;
-          if (localHalfPeriod1 > 0) {
-            unsigned long easedHalfPeriod1 = (unsigned long)localHalfPeriod1 * 4UL;
-            targetHalfPeriodTicks1 = easedHalfPeriod1 > 65535UL
-              ? 65535U
-              : (uint16_t)easedHalfPeriod1;
-          }
-          uint16_t localHalfPeriod2 = targetHalfPeriodTicks2;
-          if (localHalfPeriod2 > 0) {
-            unsigned long easedHalfPeriod2 = (unsigned long)localHalfPeriod2 * 4UL;
-            targetHalfPeriodTicks2 = easedHalfPeriod2 > 65535UL
-              ? 65535U
-              : (uint16_t)easedHalfPeriod2;
+          if (motor2CoupledToMotor1) {
+            uint16_t localHalfPeriod2 = targetHalfPeriodTicks2;
+            if (localHalfPeriod2 > 0) {
+              unsigned long easedHalfPeriod2 = (unsigned long)localHalfPeriod2 * 4UL;
+              targetHalfPeriodTicks2 = easedHalfPeriod2 > 65535UL
+                ? 65535U
+                : (uint16_t)easedHalfPeriod2;
+            }
           }
         }
         phaseAccumulator1 = 0;
@@ -871,9 +879,9 @@ ISR(TIMER1_COMPA_vect) {
     stepCount2 = 0;
     directionChangePending2 = true;
     if (activeEasing2 > 0) {
-      uint16_t localHalfPeriod1 = targetHalfPeriodTicks1;
-      targetHalfPeriodTicks2 = localHalfPeriod1 > 0
-        ? localHalfPeriod1
+      uint16_t localEasingHalfPeriod = targetMotor2EasingHalfPeriodTicks;
+      targetHalfPeriodTicks2 = localEasingHalfPeriod > 0
+        ? localEasingHalfPeriod
         : 65535U;
     }
   }

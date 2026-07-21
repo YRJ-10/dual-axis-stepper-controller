@@ -167,9 +167,31 @@ h2 {
 }
 
 .mode-button-group {
+  display: flex;
+  align-items: end;
+  gap: 14px;
+}
+
+.mode-cluster {
   display: grid;
-  grid-template-columns: repeat(11, 40px);
+  gap: 4px;
+}
+
+.mode-cluster-label {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.mode-cluster-buttons {
+  display: flex;
   gap: 6px;
+}
+
+.mode-cluster-coupled {
+  border-left: 2px solid #d97706;
+  padding-left: 14px;
 }
 
 .mode-select-button {
@@ -188,6 +210,21 @@ h2 {
 .mode-select-button.active {
   border-color: var(--accent);
   background: var(--accent);
+  color: #ffffff;
+}
+
+.mode-select-button.coupled {
+  border-color: #d97706;
+  background: #fffbeb;
+}
+
+.mode-select-button.coupled:hover:not(:disabled) {
+  background: #fef3c7;
+}
+
+.mode-select-button.coupled.active {
+  border-color: #b45309;
+  background: #b45309;
   color: #ffffff;
 }
 
@@ -382,6 +419,18 @@ tr.active-row .mode-badge {
   color: #ffffff;
 }
 
+tr.coupled-mode-row td {
+  background: #fffbeb;
+}
+
+tr.mode-group-start td {
+  border-top: 2px solid #d97706;
+}
+
+tr.coupled-mode-row.active-row .mode-badge {
+  background: #b45309;
+}
+
 .row-action {
   width: 96px;
 }
@@ -477,11 +526,12 @@ tr.active-row .mode-badge {
   }
 
   .mode-button-group {
-    grid-template-columns: repeat(6, minmax(40px, 1fr));
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .mode-select-button {
-    width: auto;
+    width: 40px;
   }
 
   .speed-panel {
