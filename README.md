@@ -1,5 +1,7 @@
 # dual-axis-stepper-controller
 
+![Dual Axis Stepper Controller](screenshot.png)
+
 Dual-axis stepper motor controller with USB serial tuning:
 
 - Potentiometer controls global speed.
