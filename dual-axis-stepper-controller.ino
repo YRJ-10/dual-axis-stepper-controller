@@ -22,11 +22,11 @@
 #define MODE_COUNT 11
 #define SERIAL_BUFFER_SIZE 64
 #define EEPROM_MAGIC 0x44584331UL
-#define EEPROM_VERSION 2
+#define EEPROM_VERSION 5
 #define OLED_RETRY_INTERVAL_MS 2000
 #define OLED_REFRESH_INTERVAL_MS 1000
 #define OLED_REINIT_INTERVAL_MS 5000
-#define FIRMWARE_ID "MOTION_SAFE_4"
+#define FIRMWARE_ID "MOTION_SAFE_7"
 #define SPEED_RAMP_INTERVAL_MS 2
 #define SPEED_RAMP_STEP 2
 #define MOTION_TICK_HZ 40000UL
@@ -46,6 +46,9 @@ struct ModeConfig {
   int multiplier2;
   int easing;
   int easing2;
+  byte startDirection1;
+  byte startDirection2;
+  byte motor2PhaseDelayPercent;
 };
 
 struct ModeConfigV1 {
@@ -55,10 +58,57 @@ struct ModeConfigV1 {
   int easing;
 };
 
+struct ModeConfigV2 {
+  int steps1;
+  int steps2;
+  int multiplier2;
+  int easing;
+  int easing2;
+};
+
+struct ModeConfigV3 {
+  int steps1;
+  int steps2;
+  int multiplier2;
+  int easing;
+  int easing2;
+  byte startDirection1;
+  byte startDirection2;
+};
+
+struct ModeConfigV4 {
+  int steps1;
+  int steps2;
+  int multiplier2;
+  int easing;
+  int easing2;
+  byte startDirection1;
+  byte startDirection2;
+  byte motor2StartPercent;
+};
+
 struct StoredConfigV1 {
   unsigned long magic;
   byte version;
   ModeConfigV1 modes[MODE_COUNT];
+};
+
+struct StoredConfigV2 {
+  unsigned long magic;
+  byte version;
+  ModeConfigV2 modes[MODE_COUNT];
+};
+
+struct StoredConfigV3 {
+  unsigned long magic;
+  byte version;
+  ModeConfigV3 modes[MODE_COUNT];
+};
+
+struct StoredConfigV4 {
+  unsigned long magic;
+  byte version;
+  ModeConfigV4 modes[MODE_COUNT];
 };
 
 struct StoredConfig {
@@ -70,17 +120,17 @@ struct StoredConfig {
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 ModeConfig modeConfigs[MODE_COUNT] = {
-  {1000, 2000, 3, 150, 150},
-  {1500, 2300, 3, 150, 150},
-  {2000, 2500, 3, 150, 150},
-  {2300, 2700, 3, 150, 150},
-  {2500, 3000, 3, 150, 150},
-  {800, 4000, 3, 150, 150},
-  {1500, 4300, 3, 150, 150},
-  {2000, 4500, 3, 150, 150},
-  {2300, 4000, 3, 150, 150},
-  {2700, 0, 3, 150, 150},
-  {3000, 0, 3, 150, 150}
+  {1000, 2000, 3, 150, 150, 1, 1, 0},
+  {1500, 2300, 3, 150, 150, 1, 1, 0},
+  {2000, 2500, 3, 150, 150, 1, 1, 0},
+  {2300, 2700, 3, 150, 150, 1, 1, 0},
+  {2500, 3000, 3, 150, 150, 1, 1, 0},
+  {800, 4000, 3, 150, 150, 1, 1, 0},
+  {1500, 4300, 3, 150, 150, 1, 1, 0},
+  {2000, 4500, 3, 150, 150, 1, 1, 0},
+  {2300, 4000, 3, 150, 150, 1, 1, 0},
+  {2700, 0, 3, 150, 150, 1, 1, 0},
+  {3000, 0, 3, 150, 150, 1, 1, 0}
 };
 
 int potValue = 0;
@@ -102,6 +152,7 @@ volatile int activeSteps2 = 2000;
 volatile int activeMultiplier2 = 3;
 volatile int activeEasing = 150;
 volatile int activeEasing2 = 150;
+volatile byte activeMotor2PhaseDelayPercent = 0;
 volatile int stepCount1 = 0;
 volatile int stepCount2 = 0;
 volatile bool dirState1 = HIGH;
@@ -135,7 +186,7 @@ void setup() {
   Serial.begin(9600);
   Serial.println(F("Dual axis controller ready"));
   sendFirmwareInfo();
-  Serial.println(F("Commands: INFO | SET mode steps1 steps2 multiplier2 easing1 easing2 | GET mode | DUMP | SAVE | LOAD | MODE mode | SPEED value | POT | STOP"));
+  Serial.println(F("Commands: INFO | SET mode steps1 steps2 multiplier2 easing1 easing2 dir1 dir2 m2delay | GET mode | DUMP | SAVE | LOAD | MODE mode | SPEED value | POT | STOP"));
 
   tryInitDisplay(true);
 
@@ -216,6 +267,10 @@ void updateBaseSpeed() {
   noInterrupts();
   nextSpeed = baseSpeed;
   interrupts();
+
+  if (nextSpeed == 0 && desiredSpeed > 0) {
+    applyModeConfig(mode, true);
+  }
 
   if (nextSpeed < desiredSpeed) {
     long increased = (long)nextSpeed + maxChange;
@@ -327,6 +382,7 @@ void updateMotionTargets() {
   int localMultiplier2;
   int localEasing1;
   int localEasing2;
+  int localMotor2PhaseDelayPercent;
   int localStepCount1;
   int localStepCount2;
   bool localMotor2Coupled;
@@ -338,6 +394,7 @@ void updateMotionTargets() {
   localMultiplier2 = activeMultiplier2;
   localEasing1 = activeEasing;
   localEasing2 = activeEasing2;
+  localMotor2PhaseDelayPercent = activeMotor2PhaseDelayPercent;
   localStepCount1 = stepCount1;
   localStepCount2 = stepCount2;
   localMotor2Coupled = motor2CoupledToMotor1;
@@ -345,9 +402,8 @@ void updateMotionTargets() {
 
   unsigned long requestedHz1 = 0;
   unsigned long requestedHz2 = 0;
-  unsigned long baseRequestedHz = 0;
+  unsigned long motor2BaseHz = 0;
   if (localBaseSpeed > 0 && localSteps1 > 0) {
-    baseRequestedHz = (unsigned long)localBaseSpeed * 2UL;
     int effectiveBase = easedBaseSpeed(
       localBaseSpeed,
       localStepCount1,
@@ -357,27 +413,40 @@ void updateMotionTargets() {
     requestedHz1 = (unsigned long)effectiveBase * 2UL;
 
     if (localSteps2 > 0) {
-      int effectiveMultiplier = easedMotor2Multiplier(
-        localMultiplier2,
-        localStepCount2,
-        localSteps2,
-        localEasing2
-      );
-      unsigned long motor2BaseHz = localMotor2Coupled
-        ? requestedHz1
-        : baseRequestedHz;
-      requestedHz2 = motor2BaseHz * (unsigned long)effectiveMultiplier;
+      int delaySteps =
+        (long)localSteps1 * localMotor2PhaseDelayPercent / 100L;
+      bool phaseWindowOpen =
+        localMotor2PhaseDelayPercent == 0 ||
+        localStepCount1 >= delaySteps;
+      bool motor2CycleIncomplete =
+        localMotor2PhaseDelayPercent == 0 ||
+        localStepCount2 < localSteps2;
+
+      if (phaseWindowOpen && motor2CycleIncomplete) {
+        int effectiveMultiplier = easedMotor2Multiplier(
+          localMultiplier2,
+          localStepCount2,
+          localSteps2,
+          localEasing2
+        );
+        motor2BaseHz = localMotor2Coupled
+          ? requestedHz1
+          : (unsigned long)localBaseSpeed * 2UL;
+        if (localMotor2PhaseDelayPercent > 0) {
+          motor2BaseHz =
+            motor2BaseHz * 100UL /
+            (100UL - localMotor2PhaseDelayPercent);
+        }
+        requestedHz2 = motor2BaseHz * (unsigned long)effectiveMultiplier;
+      }
     }
   }
 
   uint16_t nextHz1 = requestedHz1 > MOTION_MAX_STEP_HZ
     ? MOTION_MAX_STEP_HZ
     : (uint16_t)requestedHz1;
-  unsigned long motor2EasingReferenceHz = localMotor2Coupled
-    ? requestedHz1
-    : baseRequestedHz;
   uint16_t nextMotor2EasingHalfPeriod =
-    halfPeriodTicksFromHz(motor2EasingReferenceHz);
+    halfPeriodTicksFromHz(motor2BaseHz);
   uint16_t nextHalfPeriod2 = halfPeriodTicksFromHz(requestedHz2);
 
   noInterrupts();
@@ -557,6 +626,9 @@ void handleSetCommand() {
   char *multiplierToken = strtok(NULL, " ");
   char *easingToken = strtok(NULL, " ");
   char *easing2Token = strtok(NULL, " ");
+  char *direction1Token = strtok(NULL, " ");
+  char *direction2Token = strtok(NULL, " ");
+  char *motor2PhaseDelayToken = strtok(NULL, " ");
 
   if (
     modeToken == NULL ||
@@ -564,7 +636,10 @@ void handleSetCommand() {
     steps2Token == NULL ||
     multiplierToken == NULL ||
     easingToken == NULL ||
-    easing2Token == NULL
+    easing2Token == NULL ||
+    direction1Token == NULL ||
+    direction2Token == NULL ||
+    motor2PhaseDelayToken == NULL
   ) {
     Serial.println(F("ERR SET format"));
     return;
@@ -576,7 +651,10 @@ void handleSetCommand() {
     atoi(steps2Token),
     atoi(multiplierToken),
     atoi(easingToken),
-    atoi(easing2Token)
+    atoi(easing2Token),
+    (byte)atoi(direction1Token),
+    (byte)atoi(direction2Token),
+    (byte)atoi(motor2PhaseDelayToken)
   };
 
   if (!isValidMode(targetMode)) {
@@ -616,7 +694,10 @@ bool isValidConfig(ModeConfig config) {
     config.easing >= 0 &&
     config.easing <= 5000 &&
     config.easing2 >= 0 &&
-    config.easing2 <= 5000
+    config.easing2 <= 5000 &&
+    config.startDirection1 <= 1 &&
+    config.startDirection2 <= 1 &&
+    config.motor2PhaseDelayPercent <= 99
   );
 }
 
@@ -628,10 +709,29 @@ void applyModeConfig(int targetMode, bool resetCounters) {
   activeMultiplier2 = config.multiplier2;
   activeEasing = config.easing;
   activeEasing2 = config.easing2;
+  activeMotor2PhaseDelayPercent = config.motor2PhaseDelayPercent;
   motor2CoupledToMotor1 = targetMode >= 6;
   if (resetCounters) {
+    disableMotor2StepOutput();
+    PORTD &= ~STEP1_MASK;
+    stepPulseHigh1 = false;
+    phaseAccumulator1 = 0;
+    directionChangePending1 = false;
+    directionChangePending2 = false;
     stepCount1 = 0;
     stepCount2 = 0;
+    dirState1 = config.startDirection1 == 1;
+    dirState2 = config.startDirection2 == 1;
+    if (dirState1) {
+      PORTD |= DIR1_MASK;
+    } else {
+      PORTD &= ~DIR1_MASK;
+    }
+    if (dirState2) {
+      PORTB |= DIR2_MASK;
+    } else {
+      PORTB &= ~DIR2_MASK;
+    }
   }
   interrupts();
 }
@@ -649,7 +749,13 @@ void sendMode(int targetMode) {
   Serial.print(F(" "));
   Serial.print(config.easing);
   Serial.print(F(" "));
-  Serial.println(config.easing2);
+  Serial.print(config.easing2);
+  Serial.print(F(" "));
+  Serial.print(config.startDirection1);
+  Serial.print(F(" "));
+  Serial.print(config.startDirection2);
+  Serial.print(F(" "));
+  Serial.println(config.motor2PhaseDelayPercent);
 }
 
 void sendActiveMode() {
@@ -745,7 +851,76 @@ bool loadConfigsFromEeprom() {
         storedV1.modes[i].steps2,
         storedV1.modes[i].multiplier2,
         storedV1.modes[i].easing,
-        storedV1.modes[i].easing
+        storedV1.modes[i].easing,
+        1,
+        1,
+        0
+      };
+      if (!isValidConfig(nextConfig)) {
+        return false;
+      }
+      modeConfigs[i] = nextConfig;
+    }
+    return true;
+  }
+
+  if (version == 2) {
+    StoredConfigV2 storedV2;
+    EEPROM.get(0, storedV2);
+    for (int i = 0; i < MODE_COUNT; i++) {
+      ModeConfig nextConfig = {
+        storedV2.modes[i].steps1,
+        storedV2.modes[i].steps2,
+        storedV2.modes[i].multiplier2,
+        storedV2.modes[i].easing,
+        storedV2.modes[i].easing2,
+        1,
+        1,
+        0
+      };
+      if (!isValidConfig(nextConfig)) {
+        return false;
+      }
+      modeConfigs[i] = nextConfig;
+    }
+    return true;
+  }
+
+  if (version == 3) {
+    StoredConfigV3 storedV3;
+    EEPROM.get(0, storedV3);
+    for (int i = 0; i < MODE_COUNT; i++) {
+      ModeConfig nextConfig = {
+        storedV3.modes[i].steps1,
+        storedV3.modes[i].steps2,
+        storedV3.modes[i].multiplier2,
+        storedV3.modes[i].easing,
+        storedV3.modes[i].easing2,
+        storedV3.modes[i].startDirection1,
+        storedV3.modes[i].startDirection2,
+        0
+      };
+      if (!isValidConfig(nextConfig)) {
+        return false;
+      }
+      modeConfigs[i] = nextConfig;
+    }
+    return true;
+  }
+
+  if (version == 4) {
+    StoredConfigV4 storedV4;
+    EEPROM.get(0, storedV4);
+    for (int i = 0; i < MODE_COUNT; i++) {
+      ModeConfig nextConfig = {
+        storedV4.modes[i].steps1,
+        storedV4.modes[i].steps2,
+        storedV4.modes[i].multiplier2,
+        storedV4.modes[i].easing,
+        storedV4.modes[i].easing2,
+        storedV4.modes[i].startDirection1,
+        storedV4.modes[i].startDirection2,
+        storedV4.modes[i].motor2StartPercent
       };
       if (!isValidConfig(nextConfig)) {
         return false;
@@ -815,7 +990,10 @@ ISR(TIMER2_COMPA_vect) {
         if (activeEasing > 0) {
           uint16_t easedHz1 = localTargetHz1 >> 2;
           targetStepHz1 = easedHz1 > 0 ? easedHz1 : 1;
-          if (motor2CoupledToMotor1) {
+          if (
+            motor2CoupledToMotor1 &&
+            activeMotor2PhaseDelayPercent == 0
+          ) {
             uint16_t localHalfPeriod2 = targetHalfPeriodTicks2;
             if (localHalfPeriod2 > 0) {
               unsigned long easedHalfPeriod2 = (unsigned long)localHalfPeriod2 * 4UL;
@@ -824,6 +1002,11 @@ ISR(TIMER2_COMPA_vect) {
                 : (uint16_t)easedHalfPeriod2;
             }
           }
+        }
+        if (activeMotor2PhaseDelayPercent > 0) {
+          targetHalfPeriodTicks2 = 0;
+          stepCount2 = 0;
+          directionChangePending2 = true;
         }
         phaseAccumulator1 = 0;
       }
@@ -876,13 +1059,18 @@ ISR(TIMER1_COMPA_vect) {
 
   stepCount2++;
   if (stepCount2 >= activeSteps2) {
-    stepCount2 = 0;
-    directionChangePending2 = true;
-    if (activeEasing2 > 0) {
-      uint16_t localEasingHalfPeriod = targetMotor2EasingHalfPeriodTicks;
-      targetHalfPeriodTicks2 = localEasingHalfPeriod > 0
-        ? localEasingHalfPeriod
-        : 65535U;
+    if (activeMotor2PhaseDelayPercent > 0) {
+      stepCount2 = activeSteps2;
+      targetHalfPeriodTicks2 = 0;
+    } else {
+      stepCount2 = 0;
+      directionChangePending2 = true;
+      if (activeEasing2 > 0) {
+        uint16_t localEasingHalfPeriod = targetMotor2EasingHalfPeriodTicks;
+        targetHalfPeriodTicks2 = localEasingHalfPeriod > 0
+          ? localEasingHalfPeriod
+          : 65535U;
+      }
     }
   }
 }

@@ -1,25 +1,26 @@
 const MODE_COUNT = 11;
 const BAUD_RATE = 9600;
-const EXPECTED_FIRMWARE_ID = "MOTION_SAFE_4";
+const EXPECTED_FIRMWARE_ID = "MOTION_SAFE_7";
 const FIRMWARE_VERIFY_TIMEOUT_MS = 7000;
 const SPEED_MIN = 0;
 const SPEED_MAX = 100;
 const SPEED_STEP = 1;
+const BOOKMARK_STORAGE_KEY = "dualAxisModeBookmarks.v1";
 const serialBridge = window.electronSerial || null;
 const controlsBridge = window.electronControls || null;
 
 const defaultModes = [
-  [1000, 2000, 3, 150, 150],
-  [1500, 2300, 3, 150, 150],
-  [2000, 2500, 3, 150, 150],
-  [2300, 2700, 3, 150, 150],
-  [2500, 3000, 3, 150, 150],
-  [800, 4000, 3, 150, 150],
-  [1500, 4300, 3, 150, 150],
-  [2000, 4500, 3, 150, 150],
-  [2300, 4000, 3, 150, 150],
-  [2700, 0, 3, 150, 150],
-  [3000, 0, 3, 150, 150]
+  [1000, 2000, 3, 150, 150, 1, 1, 0],
+  [1500, 2300, 3, 150, 150, 1, 1, 0],
+  [2000, 2500, 3, 150, 150, 1, 1, 0],
+  [2300, 2700, 3, 150, 150, 1, 1, 0],
+  [2500, 3000, 3, 150, 150, 1, 1, 0],
+  [800, 4000, 3, 150, 150, 1, 1, 0],
+  [1500, 4300, 3, 150, 150, 1, 1, 0],
+  [2000, 4500, 3, 150, 150, 1, 1, 0],
+  [2300, 4000, 3, 150, 150, 1, 1, 0],
+  [2700, 0, 3, 150, 150, 1, 1, 0],
+  [3000, 0, 3, 150, 150, 1, 1, 0]
 ];
 
 const connectButton = document.querySelector("#connectButton");
@@ -44,6 +45,9 @@ const speedLockButton = document.querySelector("#speedLockButton");
 const stopButton = document.querySelector("#stopButton");
 const potButton = document.querySelector("#potButton");
 const modeTableBody = document.querySelector("#modeTableBody");
+const bookmarkCount = document.querySelector("#bookmarkCount");
+const bookmarkEmpty = document.querySelector("#bookmarkEmpty");
+const bookmarkList = document.querySelector("#bookmarkList");
 const logOutput = document.querySelector("#logOutput");
 
 let port = null;
@@ -62,6 +66,13 @@ let stopReleaseTimer = null;
 let firmwareVerified = false;
 let firmwareVerificationTimer = null;
 let firmwareVerificationFailed = false;
+let bookmarks = loadBookmarks();
+
+function renderIcons() {
+  if (window.lucide && typeof window.lucide.createIcons === "function") {
+    window.lucide.createIcons();
+  }
+}
 
 function syncOverlayState() {
   if (!controlsBridge || typeof controlsBridge.updateOverlayState !== "function") {
@@ -237,13 +248,41 @@ function buildUi() {
       row.classList.add("mode-group-start");
     }
     row.innerHTML = `
-      <td><span class="mode-badge">${mode}</span></td>
+      <td>
+        <div class="mode-cell">
+          <span class="mode-badge">${mode}</span>
+          <button class="icon-button bookmark-mode-button" type="button" data-bookmark-mode="${mode}"
+            aria-label="Bookmark Mode ${mode}" title="Bookmark Mode ${mode}">
+            <i data-lucide="bookmark-plus"></i>
+          </button>
+        </div>
+      </td>
       <td><input data-field="steps1" type="number" min="1" max="30000" step="1" value="${defaultModes[mode][0]}"></td>
       <td><input data-field="steps2" type="number" min="0" max="30000" step="1" value="${defaultModes[mode][1]}"></td>
       <td><input data-field="multiplier2" type="number" min="1" max="20" step="1" value="${defaultModes[mode][2]}"></td>
+      <td><input data-field="motor2PhaseDelayPercent" type="number" min="0" max="99" step="1" value="${defaultModes[mode][7]}"></td>
       <td><input data-field="easing" type="number" min="0" max="5000" step="1" value="${defaultModes[mode][3]}"></td>
       <td><input data-field="easing2" type="number" min="0" max="5000" step="1" value="${defaultModes[mode][4]}"></td>
-      <td><button class="row-action" type="button" data-apply="${mode}" disabled>Send</button></td>
+      <td>
+        <select class="direction-select" data-field="startDirection1" aria-label="Arah awal Motor 1 Mode ${mode}"
+          title="Arah awal Motor 1: atas = maju, bawah = mundur">
+          <option value="1">↑</option>
+          <option value="0">↓</option>
+        </select>
+      </td>
+      <td>
+        <select class="direction-select" data-field="startDirection2" aria-label="Arah awal Motor 2 Mode ${mode}"
+          title="Arah awal Motor 2: atas = maju, bawah = mundur">
+          <option value="1">↑</option>
+          <option value="0">↓</option>
+        </select>
+      </td>
+      <td>
+        <button class="row-action icon-button" type="button" data-apply="${mode}" disabled
+          aria-label="Kirim Mode ${mode}" title="Kirim Mode ${mode}">
+          <i data-lucide="send"></i>
+        </button>
+      </td>
     `;
     modeTableBody.append(row);
   }
@@ -283,20 +322,26 @@ function getRowValues(mode) {
     steps1: Number(row.querySelector('[data-field="steps1"]').value),
     steps2: Number(row.querySelector('[data-field="steps2"]').value),
     multiplier2: Number(row.querySelector('[data-field="multiplier2"]').value),
+    motor2PhaseDelayPercent: Number(row.querySelector('[data-field="motor2PhaseDelayPercent"]').value),
     easing: Number(row.querySelector('[data-field="easing"]').value),
-    easing2: Number(row.querySelector('[data-field="easing2"]').value)
+    easing2: Number(row.querySelector('[data-field="easing2"]').value),
+    startDirection1: Number(row.querySelector('[data-field="startDirection1"]').value),
+    startDirection2: Number(row.querySelector('[data-field="startDirection2"]').value)
   };
 
   const rules = {
     steps1: values.steps1 >= 1 && values.steps1 <= 30000,
     steps2: values.steps2 >= 0 && values.steps2 <= 30000,
     multiplier2: values.multiplier2 >= 1 && values.multiplier2 <= 20,
+    motor2PhaseDelayPercent: values.motor2PhaseDelayPercent >= 0 && values.motor2PhaseDelayPercent <= 99,
     easing: values.easing >= 0 && values.easing <= 5000,
-    easing2: values.easing2 >= 0 && values.easing2 <= 5000
+    easing2: values.easing2 >= 0 && values.easing2 <= 5000,
+    startDirection1: values.startDirection1 === 0 || values.startDirection1 === 1,
+    startDirection2: values.startDirection2 === 0 || values.startDirection2 === 1
   };
 
-  row.querySelectorAll("input").forEach((input) => {
-    input.classList.toggle("invalid", !rules[input.dataset.field]);
+  row.querySelectorAll("input, select").forEach((control) => {
+    control.classList.toggle("invalid", !rules[control.dataset.field]);
   });
 
   if (Object.values(rules).some((ok) => !ok)) {
@@ -306,18 +351,165 @@ function getRowValues(mode) {
   return values;
 }
 
-function updateRowFromModeLine(parts) {
-  const mode = Number(parts[1]);
-  if (!Number.isInteger(mode) || mode < 0 || mode >= MODE_COUNT || parts.length < 6) {
+function setRowValues(mode, values) {
+  const row = modeTableBody.querySelector(`tr[data-mode="${mode}"]`);
+  if (!row) {
     return;
   }
 
-  const row = modeTableBody.querySelector(`tr[data-mode="${mode}"]`);
-  row.querySelector('[data-field="steps1"]').value = parts[2];
-  row.querySelector('[data-field="steps2"]').value = parts[3];
-  row.querySelector('[data-field="multiplier2"]').value = parts[4];
-  row.querySelector('[data-field="easing"]').value = parts[5];
-  row.querySelector('[data-field="easing2"]').value = parts[6] || parts[5];
+  Object.entries(values).forEach(([field, value]) => {
+    const control = row.querySelector(`[data-field="${field}"]`);
+    if (control) {
+      control.value = String(value);
+      control.classList.remove("invalid");
+    }
+  });
+}
+
+function loadBookmarks() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(BOOKMARK_STORAGE_KEY) || "[]");
+    return Array.isArray(stored) ? stored : [];
+  } catch (_error) {
+    return [];
+  }
+}
+
+function saveBookmarks() {
+  localStorage.setItem(BOOKMARK_STORAGE_KEY, JSON.stringify(bookmarks));
+}
+
+function bookmarkSummary(values) {
+  const dir1 = values.startDirection1 === 1 ? "Maju" : "Mundur";
+  const dir2 = values.startDirection2 === 1 ? "Maju" : "Mundur";
+  return [
+    `M1 ${values.steps1}`,
+    `M2 ${values.steps2}`,
+    `M2 x${values.multiplier2}`,
+    `Delay ${values.motor2PhaseDelayPercent}%`,
+    `E1 ${values.easing}`,
+    `E2 ${values.easing2}`,
+    `Arah ${dir1}/${dir2}`
+  ];
+}
+
+function renderBookmarks() {
+  bookmarkList.replaceChildren();
+  bookmarkCount.textContent = `${bookmarks.length} tersimpan`;
+  bookmarkEmpty.hidden = bookmarks.length > 0;
+
+  bookmarks.forEach((bookmark) => {
+    const item = document.createElement("article");
+    item.className = "bookmark-item";
+    item.dataset.bookmarkId = bookmark.id;
+
+    const identity = document.createElement("div");
+    identity.className = "bookmark-identity";
+
+    const nameInput = document.createElement("input");
+    nameInput.className = "bookmark-name";
+    nameInput.value = bookmark.name;
+    nameInput.dataset.bookmarkName = bookmark.id;
+    nameInput.setAttribute("aria-label", "Nama atau catatan bookmark");
+
+    const meta = document.createElement("span");
+    meta.className = "bookmark-meta";
+    meta.textContent = `Asal Mode ${bookmark.sourceMode} · ${new Date(bookmark.createdAt).toLocaleString()}`;
+    identity.append(nameInput, meta);
+
+    const summary = document.createElement("div");
+    summary.className = "bookmark-summary";
+    bookmarkSummary(bookmark.values).forEach((text) => {
+      const value = document.createElement("span");
+      value.textContent = text;
+      summary.append(value);
+    });
+
+    const actions = document.createElement("div");
+    actions.className = "bookmark-actions";
+    const target = document.createElement("select");
+    target.dataset.bookmarkTarget = bookmark.id;
+    target.setAttribute("aria-label", "Mode tujuan");
+    for (let mode = 0; mode < MODE_COUNT; mode++) {
+      const option = document.createElement("option");
+      option.value = String(mode);
+      option.textContent = `Ke Mode ${mode}`;
+      option.selected = mode === (Number.isInteger(activeMode) ? activeMode : bookmark.sourceMode);
+      target.append(option);
+    }
+
+    const applyButton = document.createElement("button");
+    applyButton.type = "button";
+    applyButton.dataset.bookmarkApply = bookmark.id;
+    applyButton.textContent = "Terapkan";
+
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "bookmark-delete";
+    deleteButton.dataset.bookmarkDelete = bookmark.id;
+    deleteButton.textContent = "Hapus";
+    actions.append(target, applyButton, deleteButton);
+
+    item.append(identity, summary, actions);
+    bookmarkList.append(item);
+  });
+}
+
+function createBookmark(mode) {
+  try {
+    const sameModeCount = bookmarks.filter((item) => item.sourceMode === mode).length;
+    bookmarks.unshift({
+      id: globalThis.crypto && typeof globalThis.crypto.randomUUID === "function"
+        ? globalThis.crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      name: `Kandidat Mode ${mode} #${sameModeCount + 1}`,
+      sourceMode: mode,
+      createdAt: new Date().toISOString(),
+      values: getRowValues(mode)
+    });
+    saveBookmarks();
+    renderBookmarks();
+    setCommandStatus(`Mode ${mode} dibookmark`, "ok");
+  } catch (error) {
+    log(error.message);
+    setCommandStatus("Bookmark gagal", "error");
+  }
+}
+
+async function applyBookmark(id) {
+  const bookmark = bookmarks.find((item) => item.id === id);
+  const target = bookmarkList.querySelector(`[data-bookmark-target="${id}"]`);
+  if (!bookmark || !target) {
+    return;
+  }
+
+  const mode = Number(target.value);
+  setRowValues(mode, bookmark.values);
+  if (writer && firmwareVerified) {
+    await sendModeConfig(mode);
+    await sendCommand(`MODE ${mode}`);
+    setCommandStatus(`Bookmark diterapkan ke Mode ${mode}`, "ok");
+  } else {
+    setCommandStatus(`Bookmark disalin ke Mode ${mode}; belum dikirim`, "ok");
+  }
+}
+
+function updateRowFromModeLine(parts) {
+  const mode = Number(parts[1]);
+  if (!Number.isInteger(mode) || mode < 0 || mode >= MODE_COUNT || parts.length < 10) {
+    return;
+  }
+
+  setRowValues(mode, {
+    steps1: parts[2],
+    steps2: parts[3],
+    multiplier2: parts[4],
+    easing: parts[5],
+    easing2: parts[6],
+    startDirection1: parts[7],
+    startDirection2: parts[8],
+    motor2PhaseDelayPercent: parts[9]
+  });
 }
 
 function markModeSent(mode) {
@@ -326,12 +518,17 @@ function markModeSent(mode) {
     return;
   }
 
-  const originalText = button.textContent;
-  button.textContent = "Sent";
+  button.innerHTML = '<i data-lucide="check"></i><span>Sent</span>';
+  button.setAttribute("aria-label", `Mode ${mode} terkirim`);
+  button.title = `Mode ${mode} terkirim`;
   button.classList.add("sent");
+  renderIcons();
   setTimeout(() => {
-    button.textContent = originalText;
+    button.innerHTML = '<i data-lucide="send"></i>';
+    button.setAttribute("aria-label", `Kirim Mode ${mode}`);
+    button.title = `Kirim Mode ${mode}`;
     button.classList.remove("sent");
+    renderIcons();
   }, 1200);
 }
 
@@ -681,7 +878,8 @@ async function sendModeConfig(mode) {
     setCommandStatus(`Mengirim Mode ${mode}...`);
     await sendCommand(
       `SET ${mode} ${values.steps1} ${values.steps2} ${values.multiplier2} ${values.easing}`
-        + ` ${values.easing2}`
+        + ` ${values.easing2} ${values.startDirection1} ${values.startDirection2}`
+        + ` ${values.motor2PhaseDelayPercent}`
     );
   } catch (error) {
     log(error.message);
@@ -762,14 +960,48 @@ clearLogButton.addEventListener("click", () => {
   logOutput.textContent = "";
 });
 modeTableBody.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-apply]");
-  if (!button) {
+  const applyButton = event.target.closest("[data-apply]");
+  if (applyButton) {
+    sendModeConfig(Number(applyButton.dataset.apply));
     return;
   }
-  sendModeConfig(Number(button.dataset.apply));
+
+  const bookmarkButton = event.target.closest("[data-bookmark-mode]");
+  if (bookmarkButton) {
+    createBookmark(Number(bookmarkButton.dataset.bookmarkMode));
+  }
+});
+bookmarkList.addEventListener("change", (event) => {
+  const nameInput = event.target.closest("[data-bookmark-name]");
+  if (!nameInput) {
+    return;
+  }
+  const bookmark = bookmarks.find((item) => item.id === nameInput.dataset.bookmarkName);
+  if (bookmark) {
+    bookmark.name = nameInput.value.trim() || `Kandidat Mode ${bookmark.sourceMode}`;
+    nameInput.value = bookmark.name;
+    saveBookmarks();
+  }
+});
+bookmarkList.addEventListener("click", (event) => {
+  const applyButton = event.target.closest("[data-bookmark-apply]");
+  if (applyButton) {
+    applyBookmark(applyButton.dataset.bookmarkApply);
+    return;
+  }
+
+  const deleteButton = event.target.closest("[data-bookmark-delete]");
+  if (deleteButton) {
+    bookmarks = bookmarks.filter((item) => item.id !== deleteButton.dataset.bookmarkDelete);
+    saveBookmarks();
+    renderBookmarks();
+    setCommandStatus("Bookmark dihapus", "ok");
+  }
 });
 
 buildUi();
+renderBookmarks();
+renderIcons();
 setConnectedState(false);
 if (serialBridge) {
   desktopPortControls.hidden = false;

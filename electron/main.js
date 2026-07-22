@@ -287,8 +287,8 @@ function positionOverlayWindow() {
   const display = mainWindow && !mainWindow.isDestroyed()
     ? screen.getDisplayMatching(mainWindow.getBounds())
     : screen.getPrimaryDisplay();
-  const width = 320;
-  const height = 92;
+  const width = 370;
+  const height = 124;
   const margin = 14;
   overlayWindow.setBounds({
     x: display.workArea.x + display.workArea.width - width - margin,
@@ -300,8 +300,8 @@ function positionOverlayWindow() {
 
 function createOverlayWindow() {
   overlayWindow = new BrowserWindow({
-    width: 320,
-    height: 92,
+    width: 370,
+    height: 124,
     show: false,
     frame: false,
     transparent: true,

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Dual Axis Stepper Tuner</title>
-    <link rel="stylesheet" href="./style.css?v=20260721-motion-safe4">
+    <link rel="stylesheet" href="./style.css?v=20260722-compact1">
   </head>
   <body>
     <main class="app-shell">
@@ -61,16 +61,28 @@
           <thead>
             <tr>
               <th>Mode</th>
-              <th>Step Motor 1</th>
-              <th>Step Motor 2</th>
-              <th>Motor 2 x</th>
-              <th>Easing M1</th>
-              <th>Easing M2</th>
-              <th>Aksi</th>
+              <th>Step M1</th>
+              <th>Step M2</th>
+              <th>M2 x</th>
+              <th>Delay M2 %</th>
+              <th>Ease M1</th>
+              <th>Ease M2</th>
+              <th>Arah M1</th>
+              <th>Arah M2</th>
+              <th>Send</th>
             </tr>
           </thead>
           <tbody id="modeTableBody"></tbody>
         </table>
+      </section>
+
+      <section class="bookmark-panel" aria-label="Bookmark eksperimen">
+        <div class="bookmark-header">
+          <h2>Bookmark Eksperimen</h2>
+          <span id="bookmarkCount">0 tersimpan</span>
+        </div>
+        <p id="bookmarkEmpty" class="bookmark-empty">Belum ada bookmark.</p>
+        <div id="bookmarkList" class="bookmark-list"></div>
       </section>
 
       <section class="log-panel" aria-label="Serial log">
@@ -82,6 +94,7 @@
       </section>
     </main>
 
-    <script src="./app.js?v=20260721-motion-safe4"></script>
+    <script src="../node_modules/lucide/dist/umd/lucide.min.js"></script>
+    <script src="./app.js?v=20260722-compact1"></script>
   </body>
 </html>

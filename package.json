@@ -10,6 +10,7 @@
     "build:portable": "npm run build:native-helper && electron-builder --win portable --x64"
   },
   "dependencies": {
+    "lucide": "^1.25.0",
     "serialport": "13.0.0"
   },
   "devDependencies": {

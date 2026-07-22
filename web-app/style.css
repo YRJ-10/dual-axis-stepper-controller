@@ -57,6 +57,7 @@ button:disabled {
 .control-strip,
 .speed-panel,
 .table-wrap,
+.bookmark-panel,
 .log-panel {
   background: var(--panel);
   border: 1px solid var(--line);
@@ -374,14 +375,15 @@ select {
 
 table {
   width: 100%;
-  min-width: 760px;
+  min-width: 880px;
+  table-layout: fixed;
   border-collapse: collapse;
 }
 
 th,
 td {
   border-top: 1px solid var(--line);
-  padding: 10px;
+  padding: 6px;
   text-align: left;
   vertical-align: middle;
 }
@@ -395,13 +397,43 @@ th {
 
 td:first-child,
 th:first-child {
-  width: 72px;
+  width: 86px;
   text-align: center;
 }
 
 td:last-child,
 th:last-child {
-  width: 118px;
+  width: 52px;
+  text-align: center;
+}
+
+th:nth-child(2),
+th:nth-child(3) {
+  width: 105px;
+}
+
+th:nth-child(4) {
+  width: 62px;
+}
+
+th:nth-child(5) {
+  width: 86px;
+}
+
+th:nth-child(6),
+th:nth-child(7) {
+  width: 88px;
+}
+
+th:nth-child(8),
+th:nth-child(9) {
+  width: 64px;
+}
+
+.table-wrap input,
+.table-wrap select {
+  min-height: 34px;
+  padding: 0 6px;
 }
 
 .mode-badge {
@@ -411,6 +443,45 @@ th:last-child {
   place-items: center;
   border-radius: 6px;
   background: #e2e8f0;
+  font-weight: 700;
+}
+
+.mode-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.icon-button {
+  display: inline-grid;
+  width: 34px;
+  min-height: 34px;
+  place-items: center;
+  padding: 0;
+}
+
+.icon-button svg {
+  width: 17px;
+  height: 17px;
+}
+
+.bookmark-mode-button {
+  border-color: var(--line);
+  background: #ffffff;
+  color: var(--muted);
+}
+
+.bookmark-mode-button:hover:not(:disabled) {
+  background: #eef2f6;
+  color: var(--accent);
+}
+
+.direction-select {
+  min-width: 48px;
+  padding: 0 4px;
+  text-align: center;
+  font-size: 18px;
   font-weight: 700;
 }
 
@@ -432,11 +503,102 @@ tr.coupled-mode-row.active-row .mode-badge {
 }
 
 .row-action {
-  width: 96px;
+  width: 38px;
 }
 
 .row-action.sent {
+  width: 66px;
   background: #16a34a;
+}
+
+.row-action.sent span {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.bookmark-panel {
+  border-top: 0;
+  box-shadow: none;
+}
+
+.bookmark-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid var(--line);
+  padding: 14px 20px;
+}
+
+.bookmark-header span,
+.bookmark-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.bookmark-empty {
+  border-top: 1px solid var(--line);
+  padding: 18px 20px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.bookmark-empty[hidden] {
+  display: none;
+}
+
+.bookmark-item {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.75fr) minmax(0, 1.5fr) auto;
+  align-items: center;
+  gap: 16px;
+  border-top: 1px solid var(--line);
+  padding: 12px 20px;
+}
+
+.bookmark-identity {
+  display: grid;
+  gap: 5px;
+}
+
+.bookmark-name {
+  min-height: 34px;
+  font-weight: 700;
+}
+
+.bookmark-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.bookmark-summary span {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 5px 7px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.bookmark-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bookmark-actions select {
+  min-width: 110px;
+}
+
+.bookmark-delete {
+  border-color: #fecaca;
+  background: #ffffff;
+  color: var(--danger);
+}
+
+.bookmark-delete:hover:not(:disabled) {
+  background: #fef2f2;
 }
 
 .log-panel {
@@ -490,6 +652,7 @@ tr.coupled-mode-row.active-row .mode-badge {
   .topbar,
   .control-strip,
   .speed-panel,
+  .bookmark-panel,
   .log-panel {
     border-radius: 0;
   }
@@ -544,5 +707,18 @@ tr.coupled-mode-row.active-row .mode-badge {
 
   .speed-actions button {
     flex: 1 1 140px;
+  }
+
+  .bookmark-item {
+    grid-template-columns: 1fr;
+  }
+
+  .bookmark-actions {
+    flex-wrap: wrap;
+  }
+
+  .bookmark-actions select,
+  .bookmark-actions button {
+    flex: 1 1 120px;
   }
 }
