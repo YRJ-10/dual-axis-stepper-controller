@@ -24,40 +24,9 @@ const defaultModes = [
   [1000, 1000, 1, 150, 150, 1, 1, 0]
 ];
 
-const sequencePresets = [
-  // 0: Pemanasan
-  [
-    { s1: 1000, s2: 2000, sp: 50, m2: 2, d1: 1, d2: 1 },
-    { s1: 1000, s2: 2000, sp: 50, m2: 2, d1: 0, d2: 0 }
-  ],
-  // 1: Agresif
-  [
-    { s1: 2500, s2: 4000, sp: 100, m2: 4, d1: 1, d2: 1 },
-    { s1: 500,  s2: 1000, sp: 100, m2: 4, d1: 0, d2: 0 },
-    { s1: 500,  s2: 1000, sp: 100, m2: 4, d1: 1, d2: 1 },
-    { s1: 2500, s2: 4000, sp: 100, m2: 4, d1: 0, d2: 0 }
-  ],
-  // 2: Acak
-  [
-    { s1: 800,  s2: 1000, sp: 70,  m2: 2, d1: 1, d2: 0 },
-    { s1: 2000, s2: 3000, sp: 90,  m2: 3, d1: 0, d2: 1 },
-    { s1: 1500, s2: 500,  sp: 50,  m2: 1, d1: 1, d2: 1 },
-    { s1: 1000, s2: 4000, sp: 100, m2: 4, d1: 0, d2: 0 }
-  ],
-  // 3: Pelan-Cepat
-  [
-    { s1: 3000, s2: 5000, sp: 20,  m2: 2, d1: 1, d2: 1 },
-    { s1: 3000, s2: 5000, sp: 100, m2: 4, d1: 0, d2: 0 }
-  ],
-  // 4: Gila
-  [
-    { s1: 500,  s2: 5000, sp: 100, m2: 5, d1: 1, d2: 1 },
-    { s1: 500,  s2: 5000, sp: 100, m2: 5, d1: 0, d2: 0 },
-    { s1: 500,  s2: 5000, sp: 100, m2: 5, d1: 1, d2: 0 },
-    { s1: 500,  s2: 5000, sp: 100, m2: 5, d1: 0, d2: 1 },
-    { s1: 3000, s2: 0,    sp: 100, m2: 1, d1: 1, d2: 0 },
-    { s1: 3000, s2: 0,    sp: 100, m2: 1, d1: 0, d2: 0 }
-  ]
+// Custom Sequence state
+let currentSequence = [
+  { s1: 1000, s2: 2000, sp: 50, m2: 2, d1: 1, d2: 1 }
 ];
 
 const connectButton = document.querySelector("#connectButton");
@@ -92,7 +61,8 @@ const bookmarkList = document.querySelector("#bookmarkList");
 const logOutput = document.querySelector("#logOutput");
 
 const sendSequenceButton = document.querySelector("#sendSequenceButton");
-const presetBtns = document.querySelectorAll(".preset-btn");
+const addSeqRowButton = document.querySelector("#addSeqRowButton");
+const sequenceTableBody = document.querySelector("#sequenceTableBody");
 
 let port = null;
 let reader = null;
@@ -154,9 +124,7 @@ function updateControlAvailability() {
   stopButton.disabled = !isConnected;
   
   if (sendSequenceButton) sendSequenceButton.disabled = !controllerReady;
-  if (presetBtns) {
-    presetBtns.forEach(btn => btn.disabled = !controllerReady);
-  }
+  if (addSeqRowButton) addSeqRowButton.disabled = !controllerReady;
 
   document.querySelectorAll("[data-apply]").forEach((button) => {
     button.disabled = !controllerReady;
@@ -553,15 +521,19 @@ function updateRowFromModeLine(parts) {
     return;
   }
 
+  if (mode === 11) {
+    return;
+  }
+
   setRowValues(mode, {
-    steps1: parts[2],
-    steps2: parts[3],
-    multiplier2: parts[4],
-    easing: parts[5],
-    easing2: parts[6],
-    startDirection1: parts[7],
-    startDirection2: parts[8],
-    motor2PhaseDelayPercent: parts[9]
+    steps1: Number(parts[2]),
+    steps2: Number(parts[3]),
+    multiplier2: Number(parts[4]),
+    easing: Number(parts[5]),
+    easing2: Number(parts[6]),
+    startDirection1: Number(parts[7]),
+    startDirection2: Number(parts[8]),
+    motor2PhaseDelayPercent: Number(parts[9]),
   });
 }
 
@@ -1027,44 +999,78 @@ function sendJog1(direction) {
   }
 }
 
-let activePreset = -1;
-
-presetBtns.forEach(btn => {
-  btn.addEventListener("click", () => {
-    presetBtns.forEach(b => b.style.borderColor = "#3f3f46");
-    btn.style.borderColor = "var(--primary)";
-    activePreset = parseInt(btn.dataset.preset, 10);
-    sendSequenceButton.textContent = "Kirim & Mainkan";
+function renderSequenceTable() {
+  if (!sequenceTableBody) return;
+  sequenceTableBody.innerHTML = "";
+  currentSequence.forEach((step, index) => {
+    const tr = document.createElement("tr");
+    tr.style.borderBottom = "1px solid var(--line)";
+    
+    tr.innerHTML = `
+      <td style="padding: 8px 4px;">${index + 1}</td>
+      <td style="padding: 4px;"><select style="width: 100%; border: 1px solid var(--line); border-radius: 4px; padding: 4px;" onchange="updateSeq(${index}, 'd1', this.value)"><option value="1" ${step.d1 == 1 ? 'selected' : ''}>Maju</option><option value="0" ${step.d1 == 0 ? 'selected' : ''}>Mundur</option></select></td>
+      <td style="padding: 4px;"><input type="number" style="width: 100%; text-align: right; border: 1px solid var(--line); border-radius: 4px; padding: 4px;" value="${step.s1}" onchange="updateSeq(${index}, 's1', this.value)"></td>
+      <td style="padding: 4px;"><input type="number" style="width: 100%; text-align: right; border: 1px solid var(--line); border-radius: 4px; padding: 4px;" value="${step.sp}" onchange="updateSeq(${index}, 'sp', this.value)"></td>
+      <td style="padding: 4px;"><select style="width: 100%; border: 1px solid var(--line); border-radius: 4px; padding: 4px;" onchange="updateSeq(${index}, 'd2', this.value)"><option value="1" ${step.d2 == 1 ? 'selected' : ''}>Kanan</option><option value="0" ${step.d2 == 0 ? 'selected' : ''}>Kiri</option></select></td>
+      <td style="padding: 4px;"><input type="number" style="width: 100%; text-align: right; border: 1px solid var(--line); border-radius: 4px; padding: 4px;" value="${step.s2}" onchange="updateSeq(${index}, 's2', this.value)"></td>
+      <td style="padding: 4px;"><input type="number" style="width: 100%; text-align: right; border: 1px solid var(--line); border-radius: 4px; padding: 4px;" value="${step.m2}" onchange="updateSeq(${index}, 'm2', this.value)"></td>
+      <td style="padding: 4px;"><button style="background: var(--danger); border: none; color: white; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-weight: bold;" onclick="deleteSeq(${index})">X</button></td>
+    `;
+    sequenceTableBody.appendChild(tr);
   });
-});
+}
+
+window.updateSeq = function(index, field, value) {
+  currentSequence[index][field] = parseInt(value, 10);
+};
+
+window.deleteSeq = function(index) {
+  currentSequence.splice(index, 1);
+  renderSequenceTable();
+};
+
+if (addSeqRowButton) {
+  addSeqRowButton.addEventListener("click", () => {
+    if (currentSequence.length >= 64) {
+      setCommandStatus("Batas maksimal 64 adegan", "error");
+      return;
+    }
+    // Copy the last step as a template, or create default
+    if (currentSequence.length > 0) {
+      currentSequence.push({ ...currentSequence[currentSequence.length - 1] });
+    } else {
+      currentSequence.push({ s1: 1000, s2: 1000, sp: 50, m2: 2, d1: 1, d2: 1 });
+    }
+    renderSequenceTable();
+  });
+}
 
 if (sendSequenceButton) {
   sendSequenceButton.addEventListener("click", async () => {
-    if (activePreset === -1) {
-      setCommandStatus("Pilih preset dulu", "error");
+    if (currentSequence.length === 0) {
+      setCommandStatus("Naskah kosong!", "error");
       return;
     }
-    const preset = sequencePresets[activePreset];
-    if (!preset) return;
     
     sendSequenceButton.disabled = true;
     sendSequenceButton.textContent = "Mengirim...";
-    setCommandStatus("Mengirim Skenario...", "info");
+    setCommandStatus("Mengirim Koreografi...", "info");
     
     sendCommand("SEQ_CLEAR");
-    // Wait a tiny bit between commands so serial buffer doesn't choke
-    for (const step of preset) {
+    for (const step of currentSequence) {
       await new Promise(r => setTimeout(r, 50));
       sendCommand(`SEQ_ADD ${step.s1} ${step.s2} ${step.sp} ${step.m2} ${step.d1} ${step.d2}`);
     }
     
     await new Promise(r => setTimeout(r, 100));
     sendCommand("MODE 11"); // Start mode 11
-    setCommandStatus("Skenario dikirim!", "ok");
+    setCommandStatus("Koreografi dikirim!", "ok");
     sendSequenceButton.textContent = "Kirim & Mainkan";
     sendSequenceButton.disabled = false;
   });
 }
+
+renderSequenceTable(); // initial render
 
 jogLeftButton.addEventListener("mousedown", () => sendJog(0));
 jogLeftButton.addEventListener("touchstart", (e) => { e.preventDefault(); sendJog(0); });

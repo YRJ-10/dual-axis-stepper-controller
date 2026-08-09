@@ -1,16 +1,8 @@
-
 #include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
 #include <avr/interrupt.h>
 #include <EEPROM.h>
 #include <string.h>
 #include <stdlib.h>
-
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
-#define OLED_RESET -1
-#define SCREEN_ADDRESS 0x3C
 
 #define stepPin1 5
 #define dirPin1 2
@@ -23,16 +15,13 @@
 #define SERIAL_BUFFER_SIZE 64
 #define EEPROM_MAGIC 0x44584331UL
 #define EEPROM_VERSION 6
-#define OLED_RETRY_INTERVAL_MS 2000
-#define OLED_REFRESH_INTERVAL_MS 1000
-#define OLED_REINIT_INTERVAL_MS 5000
 #define FIRMWARE_ID "MOTION_SAFE_9"
 #define SPEED_RAMP_INTERVAL_MS 2
 #define SPEED_RAMP_STEP 2
 #define MOTION_TICK_HZ 40000UL
 #define MOTION_TIMER_HZ (F_CPU / 8UL)
 #define MOTION_MAX_STEP_HZ 18000U
-#define MOTION_TARGET_UPDATE_US 500UL
+#define MOTION_TARGET_UPDATE_US 1000UL
 #define MOTION_IDLE_HALF_TICKS 2000U
 
 #define STEP1_MASK _BV(PD5)
@@ -60,7 +49,7 @@ struct SequenceStep {
   byte dir2;
 };
 
-#define MAX_SEQ_STEPS 20
+#define MAX_SEQ_STEPS 64
 
 struct ModeConfigV1 {
   int steps1;
@@ -119,7 +108,13 @@ struct StoredConfigV3 {
 struct StoredConfigV4 {
   unsigned long magic;
   byte version;
-  ModeConfigV4 modes[MODE_COUNT];
+  ModeConfigV4 modes[MODE_COUNT]; // Wait, in V4 MODE_COUNT was 11.
+};
+
+struct StoredConfigV5 {
+  unsigned long magic;
+  byte version;
+  ModeConfig modes[11];
 };
 
 struct StoredConfig {
@@ -127,8 +122,6 @@ struct StoredConfig {
   byte version;
   ModeConfig modes[MODE_COUNT];
 };
-
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 ModeConfig modeConfigs[MODE_COUNT] = {
   {1000, 2000, 3, 150, 150, 1, 1, 0},
@@ -149,12 +142,8 @@ int potValue = 0;
 const int threshold = 10;
 int mode = 0;
 bool lastButtonState = HIGH;
-bool displayReady = false;
 bool webSpeedEnabled = true;
 int webTargetSpeed = 0;
-unsigned long lastDisplayRetryMs = 0;
-unsigned long lastDisplayRefreshMs = 0;
-unsigned long lastDisplayReinitMs = 0;
 unsigned long lastSpeedRampMs = 0;
 unsigned long lastMotionTargetUs = 0;
 
@@ -213,8 +202,6 @@ void setup() {
   sendFirmwareInfo();
   Serial.println(F("Commands: INFO | SET mode steps1 steps2 multiplier2 easing1 easing2 dir1 dir2 m2delay | GET mode | DUMP | SAVE | LOAD | MODE mode | SPEED value | POT | STOP"));
 
-  tryInitDisplay(true);
-
   if (loadConfigsFromEeprom()) {
     Serial.println(F("OK EEPROM loaded"));
   } else {
@@ -222,7 +209,6 @@ void setup() {
   }
 
   applyModeConfig(mode, true);
-  tampilkanMode();
   sendActiveMode();
   sendSpeedStatus();
 
@@ -248,7 +234,6 @@ void loop() {
   handleButton();
   updateBaseSpeed();
   updateMotionTargets();
-  maintainDisplay();
   reportActiveModePeriodically();
 }
 
@@ -257,7 +242,6 @@ void handleButton() {
   if (buttonState == LOW && lastButtonState == HIGH) {
     mode = (mode + 1) % MODE_COUNT;
     applyModeConfig(mode, true);
-    tampilkanMode();
     sendMode(mode);
     sendActiveMode();
     delay(200);
@@ -429,7 +413,6 @@ void updateMotionTargets() {
     homingComplete = false;
     mode = pendingMode;
     applyModeConfig(mode, true);
-    tampilkanMode();
     sendMode(mode);
     sendActiveMode();
     return;
@@ -629,7 +612,6 @@ void processCommand(char *line) {
       return;
     }
     applyModeConfig(mode, true);
-    tampilkanMode();
     Serial.println(F("OK LOAD"));
     sendMode(mode);
     sendActiveMode();
@@ -662,7 +644,6 @@ void processCommand(char *line) {
     } else {
       mode = nextMode;
       applyModeConfig(mode, true);
-      tampilkanMode();
       sendMode(mode);
       sendActiveMode();
     }
@@ -845,7 +826,6 @@ void handleSetCommand() {
   modeConfigs[targetMode] = nextConfig;
   if (targetMode == mode) {
     applyModeConfig(mode, true);
-    tampilkanMode();
     sendActiveMode();
   }
 
@@ -963,48 +943,6 @@ void reportActiveModePeriodically() {
   sendActiveMode();
 }
 
-void tryInitDisplay(bool reportFailure) {
-  displayReady = display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS);
-  if (displayReady) {
-    display.clearDisplay();
-    display.display();
-    lastDisplayRefreshMs = 0;
-    lastDisplayReinitMs = millis();
-    return;
-  }
-
-  if (reportFailure) {
-    Serial.println(F("OLED init failed, controller continues"));
-  }
-}
-
-void maintainDisplay() {
-  unsigned long now = millis();
-
-  if (!displayReady) {
-    if (now - lastDisplayRetryMs >= OLED_RETRY_INTERVAL_MS) {
-      lastDisplayRetryMs = now;
-      tryInitDisplay(false);
-      if (displayReady) {
-        tampilkanMode();
-      }
-    }
-    return;
-  }
-
-  if (now - lastDisplayReinitMs >= OLED_REINIT_INTERVAL_MS) {
-    lastDisplayReinitMs = now;
-    tryInitDisplay(false);
-    tampilkanMode();
-    return;
-  }
-
-  if (now - lastDisplayRefreshMs >= OLED_REFRESH_INTERVAL_MS) {
-    lastDisplayRefreshMs = now;
-    tampilkanMode();
-  }
-}
-
 void saveConfigsToEeprom() {
   StoredConfig stored;
   stored.magic = EEPROM_MAGIC;
@@ -1110,6 +1048,19 @@ bool loadConfigsFromEeprom() {
       }
       modeConfigs[i] = nextConfig;
     }
+    return true;
+  }
+
+  if (version == 5) {
+    StoredConfigV5 storedV5;
+    EEPROM.get(0, storedV5);
+    for (int i = 0; i < 11; i++) {
+      if (!isValidConfig(storedV5.modes[i])) {
+        return false;
+      }
+      modeConfigs[i] = storedV5.modes[i];
+    }
+    // For the newly added Mode 11, we just keep the default modeConfigs[11]
     return true;
   }
 
@@ -1283,29 +1234,3 @@ ISR(TIMER1_COMPA_vect) {
   }
 }
 
-void tampilkanMode() {
-  if (!displayReady) {
-    return;
-  }
-
-  display.clearDisplay();
-  display.setTextColor(WHITE);
-  display.setTextSize(3);
-  display.setCursor(20, 6);
-  display.print(F("M:"));
-  display.print(mode);
-  display.setTextSize(1);
-  display.setCursor(0, 42);
-  display.print(F("S1 "));
-  display.print(modeConfigs[mode].steps1);
-  display.print(F(" S2 "));
-  display.print(modeConfigs[mode].steps2);
-  display.setCursor(0, 54);
-  display.print(F("M2x"));
-  display.print(modeConfigs[mode].multiplier2);
-  display.print(F(" E "));
-  display.print(modeConfigs[mode].easing);
-  display.print(F("/"));
-  display.print(modeConfigs[mode].easing2);
-  display.display();
-}
