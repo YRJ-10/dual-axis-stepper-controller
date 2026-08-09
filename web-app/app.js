@@ -1,6 +1,6 @@
-const MODE_COUNT = 11;
+const MODE_COUNT = 12;
 const BAUD_RATE = 9600;
-const EXPECTED_FIRMWARE_ID = "MOTION_SAFE_8";
+const EXPECTED_FIRMWARE_ID = "MOTION_SAFE_9";
 const FIRMWARE_VERIFY_TIMEOUT_MS = 7000;
 const SPEED_MIN = 0;
 const SPEED_MAX = 100;
@@ -20,7 +20,44 @@ const defaultModes = [
   [2000, 4500, 3, 150, 150, 1, 1, 0],
   [2300, 4000, 3, 150, 150, 1, 1, 0],
   [2700, 0, 3, 150, 150, 1, 1, 0],
-  [3000, 0, 3, 150, 150, 1, 1, 0]
+  [3000, 0, 3, 150, 150, 1, 1, 0],
+  [1000, 1000, 1, 150, 150, 1, 1, 0]
+];
+
+const sequencePresets = [
+  // 0: Pemanasan
+  [
+    { s1: 1000, s2: 2000, sp: 50, m2: 2, d1: 1, d2: 1 },
+    { s1: 1000, s2: 2000, sp: 50, m2: 2, d1: 0, d2: 0 }
+  ],
+  // 1: Agresif
+  [
+    { s1: 2500, s2: 4000, sp: 100, m2: 4, d1: 1, d2: 1 },
+    { s1: 500,  s2: 1000, sp: 100, m2: 4, d1: 0, d2: 0 },
+    { s1: 500,  s2: 1000, sp: 100, m2: 4, d1: 1, d2: 1 },
+    { s1: 2500, s2: 4000, sp: 100, m2: 4, d1: 0, d2: 0 }
+  ],
+  // 2: Acak
+  [
+    { s1: 800,  s2: 1000, sp: 70,  m2: 2, d1: 1, d2: 0 },
+    { s1: 2000, s2: 3000, sp: 90,  m2: 3, d1: 0, d2: 1 },
+    { s1: 1500, s2: 500,  sp: 50,  m2: 1, d1: 1, d2: 1 },
+    { s1: 1000, s2: 4000, sp: 100, m2: 4, d1: 0, d2: 0 }
+  ],
+  // 3: Pelan-Cepat
+  [
+    { s1: 3000, s2: 5000, sp: 20,  m2: 2, d1: 1, d2: 1 },
+    { s1: 3000, s2: 5000, sp: 100, m2: 4, d1: 0, d2: 0 }
+  ],
+  // 4: Gila
+  [
+    { s1: 500,  s2: 5000, sp: 100, m2: 5, d1: 1, d2: 1 },
+    { s1: 500,  s2: 5000, sp: 100, m2: 5, d1: 0, d2: 0 },
+    { s1: 500,  s2: 5000, sp: 100, m2: 5, d1: 1, d2: 0 },
+    { s1: 500,  s2: 5000, sp: 100, m2: 5, d1: 0, d2: 1 },
+    { s1: 3000, s2: 0,    sp: 100, m2: 1, d1: 1, d2: 0 },
+    { s1: 3000, s2: 0,    sp: 100, m2: 1, d1: 0, d2: 0 }
+  ]
 ];
 
 const connectButton = document.querySelector("#connectButton");
@@ -46,11 +83,16 @@ const stopButton = document.querySelector("#stopButton");
 const potButton = document.querySelector("#potButton");
 const jogLeftButton = document.querySelector("#jogLeftButton");
 const jogRightButton = document.querySelector("#jogRightButton");
+const jogMotor1Backward = document.querySelector("#jogMotor1Backward");
+const jogMotor1Forward = document.querySelector("#jogMotor1Forward");
 const modeTableBody = document.querySelector("#modeTableBody");
 const bookmarkCount = document.querySelector("#bookmarkCount");
 const bookmarkEmpty = document.querySelector("#bookmarkEmpty");
 const bookmarkList = document.querySelector("#bookmarkList");
 const logOutput = document.querySelector("#logOutput");
+
+const sendSequenceButton = document.querySelector("#sendSequenceButton");
+const presetBtns = document.querySelectorAll(".preset-btn");
 
 let port = null;
 let reader = null;
@@ -107,7 +149,14 @@ function updateControlAvailability() {
   potButton.disabled = !controllerReady;
   jogLeftButton.disabled = !controllerReady;
   jogRightButton.disabled = !controllerReady;
+  jogMotor1Backward.disabled = !controllerReady;
+  jogMotor1Forward.disabled = !controllerReady;
   stopButton.disabled = !isConnected;
+  
+  if (sendSequenceButton) sendSequenceButton.disabled = !controllerReady;
+  if (presetBtns) {
+    presetBtns.forEach(btn => btn.disabled = !controllerReady);
+  }
 
   document.querySelectorAll("[data-apply]").forEach((button) => {
     button.disabled = !controllerReady;
@@ -794,6 +843,11 @@ function flushIncomingLines() {
       setCommandStatus("Stop", "ok");
       return;
     }
+    if (parts[0] === "OK" && parts[1] === "HOMING") {
+      log(`< ${cleanLine}`);
+      setCommandStatus("Pulang ke Nol (Homing)...", "info");
+      return;
+    }
     if (parts[0] === "ERR") {
       log(`< ${cleanLine}`);
       setCommandStatus(cleanLine, "error");
@@ -967,6 +1021,51 @@ function sendJog(direction) {
   }
 }
 
+function sendJog1(direction) {
+  if (writer && firmwareVerified) {
+    sendCommand(`JOG1 ${direction}`);
+  }
+}
+
+let activePreset = -1;
+
+presetBtns.forEach(btn => {
+  btn.addEventListener("click", () => {
+    presetBtns.forEach(b => b.style.borderColor = "#3f3f46");
+    btn.style.borderColor = "var(--primary)";
+    activePreset = parseInt(btn.dataset.preset, 10);
+    sendSequenceButton.textContent = "Kirim & Mainkan";
+  });
+});
+
+if (sendSequenceButton) {
+  sendSequenceButton.addEventListener("click", async () => {
+    if (activePreset === -1) {
+      setCommandStatus("Pilih preset dulu", "error");
+      return;
+    }
+    const preset = sequencePresets[activePreset];
+    if (!preset) return;
+    
+    sendSequenceButton.disabled = true;
+    sendSequenceButton.textContent = "Mengirim...";
+    setCommandStatus("Mengirim Skenario...", "info");
+    
+    sendCommand("SEQ_CLEAR");
+    // Wait a tiny bit between commands so serial buffer doesn't choke
+    for (const step of preset) {
+      await new Promise(r => setTimeout(r, 50));
+      sendCommand(`SEQ_ADD ${step.s1} ${step.s2} ${step.sp} ${step.m2} ${step.d1} ${step.d2}`);
+    }
+    
+    await new Promise(r => setTimeout(r, 100));
+    sendCommand("MODE 11"); // Start mode 11
+    setCommandStatus("Skenario dikirim!", "ok");
+    sendSequenceButton.textContent = "Kirim & Mainkan";
+    sendSequenceButton.disabled = false;
+  });
+}
+
 jogLeftButton.addEventListener("mousedown", () => sendJog(0));
 jogLeftButton.addEventListener("touchstart", (e) => { e.preventDefault(); sendJog(0); });
 jogLeftButton.addEventListener("mouseup", () => requestStop());
@@ -978,6 +1077,18 @@ jogRightButton.addEventListener("touchstart", (e) => { e.preventDefault(); sendJ
 jogRightButton.addEventListener("mouseup", () => requestStop());
 jogRightButton.addEventListener("mouseleave", () => requestStop());
 jogRightButton.addEventListener("touchend", () => requestStop());
+
+jogMotor1Backward.addEventListener("mousedown", () => sendJog1(0));
+jogMotor1Backward.addEventListener("touchstart", (e) => { e.preventDefault(); sendJog1(0); });
+jogMotor1Backward.addEventListener("mouseup", () => requestStop());
+jogMotor1Backward.addEventListener("mouseleave", () => requestStop());
+jogMotor1Backward.addEventListener("touchend", () => requestStop());
+
+jogMotor1Forward.addEventListener("mousedown", () => sendJog1(1));
+jogMotor1Forward.addEventListener("touchstart", (e) => { e.preventDefault(); sendJog1(1); });
+jogMotor1Forward.addEventListener("mouseup", () => requestStop());
+jogMotor1Forward.addEventListener("mouseleave", () => requestStop());
+jogMotor1Forward.addEventListener("touchend", () => requestStop());
 
 clearLogButton.addEventListener("click", () => {
   logOutput.textContent = "";

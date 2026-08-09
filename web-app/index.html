@@ -56,13 +56,17 @@
         </div>
       </section>
 
-      <section class="calibration-panel" aria-label="Kalibrasi Cincin">
+      <section class="calibration-panel" aria-label="Kalibrasi Posisi Nol">
         <div class="calibration-header">
-          <span>Kalibrasi Cincin (Tahan tombol)</span>
+          <span>Kalibrasi Posisi Nol (Tahan tombol)</span>
         </div>
         <div class="calibration-actions">
-          <button id="jogLeftButton" type="button"><i data-lucide="rotate-ccw"></i> Kiri</button>
-          <button id="jogRightButton" type="button">Kanan <i data-lucide="rotate-cw"></i></button>
+          <button id="jogMotor1Backward" type="button"><i data-lucide="arrow-left"></i> M1 Mundur</button>
+          <button id="jogMotor1Forward" type="button">M1 Maju <i data-lucide="arrow-right"></i></button>
+        </div>
+        <div class="calibration-actions" style="margin-top: 10px;">
+          <button id="jogLeftButton" type="button"><i data-lucide="rotate-ccw"></i> M2 Kiri</button>
+          <button id="jogRightButton" type="button">M2 Kanan <i data-lucide="rotate-cw"></i></button>
         </div>
       </section>
 
@@ -84,6 +88,20 @@
           </thead>
           <tbody id="modeTableBody"></tbody>
         </table>
+      </section>
+
+      <section class="sequence-panel" aria-label="Skenario Kustom">
+        <div class="sequence-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <h2 style="font-size: 14px; margin: 0; color: #a1a1aa;">Skenario / Macro (Mode 11)</h2>
+          <button id="sendSequenceButton" type="button" disabled style="background: var(--primary); border: none; color: #fff; padding: 4px 12px; border-radius: 4px; font-weight: bold; cursor: pointer;">Kirim & Mainkan</button>
+        </div>
+        <div class="sequence-presets" style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button class="preset-btn" type="button" data-preset="0" style="flex: 1; padding: 8px; background: #27272a; border: 1px solid #3f3f46; color: #e4e4e7; border-radius: 4px; cursor: pointer;">Pemanasan</button>
+          <button class="preset-btn" type="button" data-preset="1" style="flex: 1; padding: 8px; background: #27272a; border: 1px solid #3f3f46; color: #e4e4e7; border-radius: 4px; cursor: pointer;">Agresif</button>
+          <button class="preset-btn" type="button" data-preset="2" style="flex: 1; padding: 8px; background: #27272a; border: 1px solid #3f3f46; color: #e4e4e7; border-radius: 4px; cursor: pointer;">Acak</button>
+          <button class="preset-btn" type="button" data-preset="3" style="flex: 1; padding: 8px; background: #27272a; border: 1px solid #3f3f46; color: #e4e4e7; border-radius: 4px; cursor: pointer;">Pelan-Cepat</button>
+          <button class="preset-btn" type="button" data-preset="4" style="flex: 1; padding: 8px; background: #27272a; border: 1px solid #3f3f46; color: #e4e4e7; border-radius: 4px; cursor: pointer;">Gila</button>
+        </div>
       </section>
 
       <section class="bookmark-panel" aria-label="Bookmark eksperimen">

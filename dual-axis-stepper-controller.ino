@@ -19,14 +19,14 @@
 #define potPin A0
 #define buttonPin 4
 
-#define MODE_COUNT 11
+#define MODE_COUNT 12
 #define SERIAL_BUFFER_SIZE 64
 #define EEPROM_MAGIC 0x44584331UL
-#define EEPROM_VERSION 5
+#define EEPROM_VERSION 6
 #define OLED_RETRY_INTERVAL_MS 2000
 #define OLED_REFRESH_INTERVAL_MS 1000
 #define OLED_REINIT_INTERVAL_MS 5000
-#define FIRMWARE_ID "MOTION_SAFE_8"
+#define FIRMWARE_ID "MOTION_SAFE_9"
 #define SPEED_RAMP_INTERVAL_MS 2
 #define SPEED_RAMP_STEP 2
 #define MOTION_TICK_HZ 40000UL
@@ -50,6 +50,17 @@ struct ModeConfig {
   byte startDirection2;
   byte motor2PhaseDelayPercent;
 };
+
+struct SequenceStep {
+  int targetSteps1;
+  int targetSteps2;
+  int speed1;
+  int multiplier2;
+  byte dir1;
+  byte dir2;
+};
+
+#define MAX_SEQ_STEPS 20
 
 struct ModeConfigV1 {
   int steps1;
@@ -130,7 +141,8 @@ ModeConfig modeConfigs[MODE_COUNT] = {
   {2000, 4500, 3, 150, 150, 1, 1, 0},
   {2300, 4000, 3, 150, 150, 1, 1, 0},
   {2700, 0, 3, 150, 150, 1, 1, 0},
-  {3000, 0, 3, 150, 150, 1, 1, 0}
+  {3000, 0, 3, 150, 150, 1, 1, 0},
+  {1000, 1000, 1, 150, 150, 1, 1, 0}
 };
 
 int potValue = 0;
@@ -167,6 +179,18 @@ volatile bool directionChangePending1 = false;
 volatile bool directionChangePending2 = false;
 volatile bool motor2CoupledToMotor1 = false;
 volatile bool isJoggingMotor2 = false;
+volatile long absolutePosition1 = 0;
+volatile bool isJoggingMotor1 = false;
+volatile bool isHoming = false;
+volatile bool homingComplete = false;
+int pendingMode = 0;
+
+SequenceStep customSequence[MAX_SEQ_STEPS];
+byte customSeqLength = 0;
+byte currentSeqIndex = 0;
+bool sequenceRunning = false;
+volatile bool seqMotor1Done = false;
+volatile bool seqMotor2Done = false;
 
 char serialBuffer[SERIAL_BUFFER_SIZE];
 byte serialIndex = 0;
@@ -366,6 +390,31 @@ uint16_t halfPeriodTicksFromHz(unsigned long requestedHz) {
   return (uint16_t)halfPeriodTicks;
 }
 
+void loadSequenceStep() {
+  if (customSeqLength == 0) return;
+  if (currentSeqIndex >= customSeqLength) {
+    currentSeqIndex = 0;
+  }
+  noInterrupts();
+  SequenceStep step = customSequence[currentSeqIndex];
+  baseSpeed = step.speed1;
+  activeSteps1 = step.targetSteps1;
+  activeSteps2 = step.targetSteps2;
+  activeMultiplier2 = step.multiplier2;
+  dirState1 = step.dir1 == 1;
+  dirState2 = step.dir2 == 1;
+  if (dirState1) PORTD |= DIR1_MASK; else PORTD &= ~DIR1_MASK;
+  if (dirState2) PORTB |= DIR2_MASK; else PORTB &= ~DIR2_MASK;
+  stepCount1 = 0;
+  stepCount2 = 0;
+  phaseAccumulator1 = 0;
+  directionChangePending1 = false;
+  directionChangePending2 = false;
+  seqMotor1Done = false;
+  seqMotor2Done = false;
+  interrupts();
+}
+
 void updateMotionTargets() {
   unsigned long now = micros();
   if (now - lastMotionTargetUs < MOTION_TARGET_UPDATE_US) {
@@ -373,7 +422,34 @@ void updateMotionTargets() {
   }
   lastMotionTargetUs = now;
 
-  if (isJoggingMotor2) {
+  if (isJoggingMotor2 || isJoggingMotor1 || isHoming) {
+    return;
+  }
+  if (homingComplete) {
+    homingComplete = false;
+    mode = pendingMode;
+    applyModeConfig(mode, true);
+    tampilkanMode();
+    sendMode(mode);
+    sendActiveMode();
+    return;
+  }
+
+  if (mode == 11) {
+    if (sequenceRunning) {
+      bool m1Done = (activeSteps1 == 0 || seqMotor1Done);
+      bool m2Done = (activeSteps2 == 0 || seqMotor2Done);
+      if (m1Done && m2Done) {
+        currentSeqIndex++;
+        loadSequenceStep();
+      } else {
+        noInterrupts();
+        targetStepHz1 = baseSpeed > 0 ? (uint16_t)baseSpeed * 2 : 0;
+        unsigned long m2hz = (unsigned long)baseSpeed * 2 * activeMultiplier2;
+        targetHalfPeriodTicks2 = halfPeriodTicksFromHz(m2hz);
+        interrupts();
+      }
+    }
     return;
   }
 
@@ -468,7 +544,12 @@ void disableMotor2StepOutput() {
 
 void stopMotionImmediately() {
   noInterrupts();
+  if (isJoggingMotor1) {
+    absolutePosition1 = 0;
+    isJoggingMotor1 = false;
+  }
   isJoggingMotor2 = false;
+  isHoming = false;
   baseSpeed = 0;
   targetStepHz1 = 0;
   targetMotor2EasingHalfPeriodTicks = 0;
@@ -562,11 +643,29 @@ void processCommand(char *line) {
       Serial.println(F("ERR mode"));
       return;
     }
-    mode = nextMode;
-    applyModeConfig(mode, true);
-    tampilkanMode();
-    sendMode(mode);
-    sendActiveMode();
+    if (absolutePosition1 != 0) {
+      pendingMode = nextMode;
+      isHoming = true;
+      homingComplete = false;
+      noInterrupts();
+      dirState1 = (absolutePosition1 < 0);
+      if (dirState1) {
+        PORTD |= DIR1_MASK;
+      } else {
+        PORTD &= ~DIR1_MASK;
+      }
+      disableMotor2StepOutput();
+      targetStepHz1 = 1000;
+      interrupts();
+      Serial.println(F("OK HOMING"));
+      return;
+    } else {
+      mode = nextMode;
+      applyModeConfig(mode, true);
+      tampilkanMode();
+      sendMode(mode);
+      sendActiveMode();
+    }
     return;
   }
 
@@ -609,6 +708,61 @@ void processCommand(char *line) {
       interrupts();
       Serial.println(F("OK JOG2"));
     }
+    return;
+  }
+
+  if (strcmp(cmd, "JOG1") == 0) {
+    char *dirToken = strtok(NULL, " ");
+    if (dirToken != NULL) {
+      int dir = atoi(dirToken);
+      stopMotionImmediately();
+      noInterrupts();
+      isJoggingMotor1 = true;
+      dirState1 = (dir == 1);
+      if (dirState1) {
+        PORTD |= DIR1_MASK;
+      } else {
+        PORTD &= ~DIR1_MASK;
+      }
+      directionChangePending1 = false;
+      disableMotor2StepOutput();
+      targetStepHz1 = 1000;
+      interrupts();
+      Serial.println(F("OK JOG1"));
+    }
+    return;
+  }
+
+  if (strcmp(cmd, "SEQ_CLEAR") == 0) {
+    customSeqLength = 0;
+    Serial.println(F("OK SEQ_CLEAR"));
+    return;
+  }
+
+  if (strcmp(cmd, "SEQ_ADD") == 0) {
+    if (customSeqLength >= MAX_SEQ_STEPS) {
+      Serial.println(F("ERR SEQ full"));
+      return;
+    }
+    char *s1Tok = strtok(NULL, " ");
+    char *s2Tok = strtok(NULL, " ");
+    char *spTok = strtok(NULL, " ");
+    char *m2Tok = strtok(NULL, " ");
+    char *d1Tok = strtok(NULL, " ");
+    char *d2Tok = strtok(NULL, " ");
+    if (!s1Tok || !s2Tok || !spTok || !m2Tok || !d1Tok || !d2Tok) {
+      Serial.println(F("ERR SEQ_ADD format"));
+      return;
+    }
+    customSequence[customSeqLength].targetSteps1 = atoi(s1Tok);
+    customSequence[customSeqLength].targetSteps2 = atoi(s2Tok);
+    customSequence[customSeqLength].speed1 = atoi(spTok);
+    customSequence[customSeqLength].multiplier2 = atoi(m2Tok);
+    customSequence[customSeqLength].dir1 = atoi(d1Tok);
+    customSequence[customSeqLength].dir2 = atoi(d2Tok);
+    customSeqLength++;
+    Serial.print(F("OK SEQ_ADD "));
+    Serial.println(customSeqLength);
     return;
   }
 
@@ -723,6 +877,14 @@ bool isValidConfig(ModeConfig config) {
 }
 
 void applyModeConfig(int targetMode, bool resetCounters) {
+  if (targetMode == 11) {
+    if (resetCounters) {
+      currentSeqIndex = 0;
+      sequenceRunning = (customSeqLength > 0);
+      loadSequenceStep();
+    }
+    return;
+  }
   ModeConfig config = modeConfigs[targetMode];
   noInterrupts();
   activeSteps1 = config.steps1;
@@ -1004,32 +1166,50 @@ ISR(TIMER2_COMPA_vect) {
       PORTD |= STEP1_MASK;
       stepPulseHigh1 = true;
       stepCount1++;
+      if (dirState1) {
+        absolutePosition1++;
+      } else {
+        absolutePosition1--;
+      }
 
-      if (stepCount1 >= activeSteps1) {
-        stepCount1 = 0;
-        directionChangePending1 = true;
-        if (activeEasing > 0) {
-          uint16_t easedHz1 = localTargetHz1 >> 2;
-          targetStepHz1 = easedHz1 > 0 ? easedHz1 : 1;
-          if (
-            motor2CoupledToMotor1 &&
-            activeMotor2PhaseDelayPercent == 0
-          ) {
-            uint16_t localHalfPeriod2 = targetHalfPeriodTicks2;
-            if (localHalfPeriod2 > 0) {
-              unsigned long easedHalfPeriod2 = (unsigned long)localHalfPeriod2 * 4UL;
-              targetHalfPeriodTicks2 = easedHalfPeriod2 > 65535UL
-                ? 65535U
-                : (uint16_t)easedHalfPeriod2;
+      if (isJoggingMotor1) {
+        // do nothing, step indefinitely
+      } else if (isHoming) {
+        if (absolutePosition1 == 0) {
+          isHoming = false;
+          homingComplete = true;
+          targetStepHz1 = 0;
+        }
+      } else if (stepCount1 >= activeSteps1) {
+        if (mode == 11) {
+          targetStepHz1 = 0;
+          seqMotor1Done = true;
+        } else {
+          stepCount1 = 0;
+          directionChangePending1 = true;
+          if (activeEasing > 0) {
+            uint16_t easedHz1 = localTargetHz1 >> 2;
+            targetStepHz1 = easedHz1 > 0 ? easedHz1 : 1;
+            if (
+              motor2CoupledToMotor1 &&
+              activeMotor2PhaseDelayPercent == 0
+            ) {
+              uint16_t localHalfPeriod2 = targetHalfPeriodTicks2;
+              if (localHalfPeriod2 > 0) {
+                unsigned long easedHalfPeriod2 = (unsigned long)localHalfPeriod2 * 4UL;
+                targetHalfPeriodTicks2 = easedHalfPeriod2 > 65535UL
+                  ? 65535U
+                  : (uint16_t)easedHalfPeriod2;
+              }
             }
           }
+          if (activeMotor2PhaseDelayPercent > 0) {
+            targetHalfPeriodTicks2 = 0;
+            stepCount2 = 0;
+            directionChangePending2 = true;
+          }
+          phaseAccumulator1 = 0;
         }
-        if (activeMotor2PhaseDelayPercent > 0) {
-          targetHalfPeriodTicks2 = 0;
-          stepCount2 = 0;
-          directionChangePending2 = true;
-        }
-        phaseAccumulator1 = 0;
       }
     }
   }
@@ -1042,7 +1222,7 @@ ISR(TIMER1_COMPA_vect) {
   }
 
   uint16_t localHalfPeriod = targetHalfPeriodTicks2;
-  if (localHalfPeriod == 0 || activeSteps2 <= 0) {
+  if (localHalfPeriod == 0 || (mode != 11 && activeSteps2 <= 0)) {
     disableMotor2StepOutput();
     if (directionChangePending2) {
       dirState2 = !dirState2;
@@ -1081,17 +1261,22 @@ ISR(TIMER1_COMPA_vect) {
   stepCount2++;
   if (!isJoggingMotor2) {
     if (stepCount2 >= activeSteps2) {
-      if (activeMotor2PhaseDelayPercent > 0) {
-        stepCount2 = activeSteps2;
+      if (mode == 11) {
         targetHalfPeriodTicks2 = 0;
+        seqMotor2Done = true;
       } else {
-        stepCount2 = 0;
-        directionChangePending2 = true;
-        if (activeEasing2 > 0) {
-          uint16_t localEasingHalfPeriod = targetMotor2EasingHalfPeriodTicks;
-          targetHalfPeriodTicks2 = localEasingHalfPeriod > 0
-            ? localEasingHalfPeriod
-            : 65535U;
+        if (activeMotor2PhaseDelayPercent > 0) {
+          stepCount2 = activeSteps2;
+          targetHalfPeriodTicks2 = 0;
+        } else {
+          stepCount2 = 0;
+          directionChangePending2 = true;
+          if (activeEasing2 > 0) {
+            uint16_t localEasingHalfPeriod = targetMotor2EasingHalfPeriodTicks;
+            targetHalfPeriodTicks2 = localEasingHalfPeriod > 0
+              ? localEasingHalfPeriod
+              : 65535U;
+          }
         }
       }
     }
