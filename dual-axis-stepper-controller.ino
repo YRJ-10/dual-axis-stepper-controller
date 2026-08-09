@@ -166,6 +166,7 @@ volatile bool stepPulseHigh2 = false;
 volatile bool directionChangePending1 = false;
 volatile bool directionChangePending2 = false;
 volatile bool motor2CoupledToMotor1 = false;
+volatile bool isJoggingMotor2 = false;
 
 char serialBuffer[SERIAL_BUFFER_SIZE];
 byte serialIndex = 0;
@@ -372,6 +373,10 @@ void updateMotionTargets() {
   }
   lastMotionTargetUs = now;
 
+  if (isJoggingMotor2) {
+    return;
+  }
+
   int localBaseSpeed;
   int localSteps1;
   int localSteps2;
@@ -463,6 +468,7 @@ void disableMotor2StepOutput() {
 
 void stopMotionImmediately() {
   noInterrupts();
+  isJoggingMotor2 = false;
   baseSpeed = 0;
   targetStepHz1 = 0;
   targetMotor2EasingHalfPeriodTicks = 0;
@@ -582,6 +588,27 @@ void processCommand(char *line) {
     stopMotionImmediately();
     Serial.println(F("OK STOP"));
     sendSpeedStatus();
+    return;
+  }
+
+  if (strcmp(cmd, "JOG2") == 0) {
+    char *dirToken = strtok(NULL, " ");
+    if (dirToken != NULL) {
+      int dir = atoi(dirToken);
+      stopMotionImmediately();
+      noInterrupts();
+      isJoggingMotor2 = true;
+      dirState2 = (dir == 1);
+      if (dirState2) {
+        PORTB |= DIR2_MASK;
+      } else {
+        PORTB &= ~DIR2_MASK;
+      }
+      directionChangePending2 = false;
+      targetHalfPeriodTicks2 = halfPeriodTicksFromHz(800);
+      interrupts();
+      Serial.println(F("OK JOG2"));
+    }
     return;
   }
 
@@ -1052,18 +1079,20 @@ ISR(TIMER1_COMPA_vect) {
   }
 
   stepCount2++;
-  if (stepCount2 >= activeSteps2) {
-    if (activeMotor2PhaseDelayPercent > 0) {
-      stepCount2 = activeSteps2;
-      targetHalfPeriodTicks2 = 0;
-    } else {
-      stepCount2 = 0;
-      directionChangePending2 = true;
-      if (activeEasing2 > 0) {
-        uint16_t localEasingHalfPeriod = targetMotor2EasingHalfPeriodTicks;
-        targetHalfPeriodTicks2 = localEasingHalfPeriod > 0
-          ? localEasingHalfPeriod
-          : 65535U;
+  if (!isJoggingMotor2) {
+    if (stepCount2 >= activeSteps2) {
+      if (activeMotor2PhaseDelayPercent > 0) {
+        stepCount2 = activeSteps2;
+        targetHalfPeriodTicks2 = 0;
+      } else {
+        stepCount2 = 0;
+        directionChangePending2 = true;
+        if (activeEasing2 > 0) {
+          uint16_t localEasingHalfPeriod = targetMotor2EasingHalfPeriodTicks;
+          targetHalfPeriodTicks2 = localEasingHalfPeriod > 0
+            ? localEasingHalfPeriod
+            : 65535U;
+        }
       }
     }
   }

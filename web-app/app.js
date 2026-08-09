@@ -44,6 +44,8 @@ const globalMouseButton = document.querySelector("#globalMouseButton");
 const speedLockButton = document.querySelector("#speedLockButton");
 const stopButton = document.querySelector("#stopButton");
 const potButton = document.querySelector("#potButton");
+const jogLeftButton = document.querySelector("#jogLeftButton");
+const jogRightButton = document.querySelector("#jogRightButton");
 const modeTableBody = document.querySelector("#modeTableBody");
 const bookmarkCount = document.querySelector("#bookmarkCount");
 const bookmarkEmpty = document.querySelector("#bookmarkEmpty");
@@ -103,6 +105,8 @@ function updateControlAvailability() {
   speedSlider.disabled = !controllerReady;
   speedLockButton.disabled = !controllerReady;
   potButton.disabled = !controllerReady;
+  jogLeftButton.disabled = !controllerReady;
+  jogRightButton.disabled = !controllerReady;
   stopButton.disabled = !isConnected;
 
   document.querySelectorAll("[data-apply]").forEach((button) => {
@@ -956,6 +960,25 @@ window.addEventListener("keydown", (event) => {
     requestStop();
   }
 });
+
+function sendJog(direction) {
+  if (writer && firmwareVerified) {
+    sendCommand(`JOG2 ${direction}`);
+  }
+}
+
+jogLeftButton.addEventListener("mousedown", () => sendJog(0));
+jogLeftButton.addEventListener("touchstart", (e) => { e.preventDefault(); sendJog(0); });
+jogLeftButton.addEventListener("mouseup", () => requestStop());
+jogLeftButton.addEventListener("mouseleave", () => requestStop());
+jogLeftButton.addEventListener("touchend", () => requestStop());
+
+jogRightButton.addEventListener("mousedown", () => sendJog(1));
+jogRightButton.addEventListener("touchstart", (e) => { e.preventDefault(); sendJog(1); });
+jogRightButton.addEventListener("mouseup", () => requestStop());
+jogRightButton.addEventListener("mouseleave", () => requestStop());
+jogRightButton.addEventListener("touchend", () => requestStop());
+
 clearLogButton.addEventListener("click", () => {
   logOutput.textContent = "";
 });

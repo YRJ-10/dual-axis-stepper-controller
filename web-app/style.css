@@ -58,6 +58,7 @@ button:disabled {
 .speed-panel,
 .table-wrap,
 .bookmark-panel,
+.calibration-panel,
 .log-panel {
   background: var(--panel);
   border: 1px solid var(--line);
@@ -316,6 +317,41 @@ h2 {
 }
 
 #potButton:hover:not(:disabled) {
+  background: #eef2f6;
+}
+
+.calibration-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 0;
+  box-shadow: none;
+  padding: 16px 20px;
+  background: #fdfdfd;
+}
+
+.calibration-header {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.calibration-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.calibration-actions button {
+  background: #ffffff;
+  border-color: var(--line);
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.calibration-actions button:hover:not(:disabled) {
   background: #eef2f6;
 }
 
@@ -652,6 +688,7 @@ tr.coupled-mode-row.active-row .mode-badge {
   .topbar,
   .control-strip,
   .speed-panel,
+  .calibration-panel,
   .bookmark-panel,
   .log-panel {
     border-radius: 0;
@@ -669,6 +706,7 @@ tr.coupled-mode-row.active-row .mode-badge {
   .actions button,
   .command-status,
   .speed-panel,
+  .calibration-panel,
   .control-strip button,
   .control-strip label {
     flex: 1 1 150px;
@@ -699,6 +737,16 @@ tr.coupled-mode-row.active-row .mode-badge {
 
   .speed-panel {
     grid-template-columns: 1fr;
+  }
+
+  .calibration-panel {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .calibration-actions button {
+    flex: 1 1 140px;
+    justify-content: center;
   }
 
   .speed-actions {
