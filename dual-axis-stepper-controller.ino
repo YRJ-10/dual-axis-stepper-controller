@@ -26,7 +26,7 @@
 #define OLED_RETRY_INTERVAL_MS 2000
 #define OLED_REFRESH_INTERVAL_MS 1000
 #define OLED_REINIT_INTERVAL_MS 5000
-#define FIRMWARE_ID "MOTION_SAFE_7"
+#define FIRMWARE_ID "MOTION_SAFE_8"
 #define SPEED_RAMP_INTERVAL_MS 2
 #define SPEED_RAMP_STEP 2
 #define MOTION_TICK_HZ 40000UL
@@ -268,10 +268,6 @@ void updateBaseSpeed() {
   nextSpeed = baseSpeed;
   interrupts();
 
-  if (nextSpeed == 0 && desiredSpeed > 0) {
-    applyModeConfig(mode, true);
-  }
-
   if (nextSpeed < desiredSpeed) {
     long increased = (long)nextSpeed + maxChange;
     nextSpeed = increased > desiredSpeed ? desiredSpeed : (int)increased;
@@ -473,8 +469,6 @@ void stopMotionImmediately() {
   targetHalfPeriodTicks2 = 0;
   phaseAccumulator1 = 0;
   stepPulseHigh1 = false;
-  directionChangePending1 = false;
-  directionChangePending2 = false;
   disableMotor2StepOutput();
   PORTD &= ~STEP1_MASK;
   interrupts();
