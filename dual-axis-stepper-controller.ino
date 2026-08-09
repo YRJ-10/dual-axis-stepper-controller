@@ -1096,14 +1096,14 @@ ISR(TIMER2_COMPA_vect) {
   uint16_t localTargetHz1 = targetStepHz1;
 
   if (motor1WasHigh) {
-    PORTD &= ~STEP1_MASK;
+    if (mode == 11) PORTB &= ~STEP2_MASK; else PORTD &= ~STEP1_MASK;
     stepPulseHigh1 = false;
     if (directionChangePending1) {
       dirState1 = !dirState1;
       if (dirState1) {
-        PORTD |= DIR1_MASK;
+        if (mode == 11) PORTB |= DIR2_MASK; else PORTD |= DIR1_MASK;
       } else {
-        PORTD &= ~DIR1_MASK;
+        if (mode == 11) PORTB &= ~DIR2_MASK; else PORTD &= ~DIR1_MASK;
       }
       directionChangePending1 = false;
     }
@@ -1114,7 +1114,7 @@ ISR(TIMER2_COMPA_vect) {
     phaseAccumulator1 += localTargetHz1;
     if (!motor1WasHigh && phaseAccumulator1 >= MOTION_TICK_HZ) {
       phaseAccumulator1 -= MOTION_TICK_HZ;
-      PORTD |= STEP1_MASK;
+      if (mode == 11) PORTB |= STEP2_MASK; else PORTD |= STEP1_MASK;
       stepPulseHigh1 = true;
       stepCount1++;
       if (dirState1) {
@@ -1168,8 +1168,15 @@ ISR(TIMER2_COMPA_vect) {
 
 ISR(TIMER1_COMPA_vect) {
   bool outputEnabled = (TCCR1A & (1 << COM1A0)) != 0;
+  if (mode == 11) outputEnabled = stepPulseHigh2;
+
   if (outputEnabled) {
-    stepPulseHigh2 = !stepPulseHigh2;
+    if (mode == 11) {
+      PORTD |= STEP1_MASK;
+      stepPulseHigh2 = false;
+    } else {
+      stepPulseHigh2 = !stepPulseHigh2;
+    }
   }
 
   uint16_t localHalfPeriod = targetHalfPeriodTicks2;
@@ -1178,9 +1185,9 @@ ISR(TIMER1_COMPA_vect) {
     if (directionChangePending2) {
       dirState2 = !dirState2;
       if (dirState2) {
-        PORTB |= DIR2_MASK;
+        if (mode == 11) PORTD |= DIR1_MASK; else PORTB |= DIR2_MASK;
       } else {
-        PORTB &= ~DIR2_MASK;
+        if (mode == 11) PORTD &= ~DIR1_MASK; else PORTB &= ~DIR2_MASK;
       }
       directionChangePending2 = false;
     }
@@ -1190,9 +1197,14 @@ ISR(TIMER1_COMPA_vect) {
 
   OCR1A = localHalfPeriod - 1;
   if (!outputEnabled) {
-    PORTB &= ~STEP2_MASK;
-    stepPulseHigh2 = false;
-    TCCR1A |= (1 << COM1A0);
+    if (mode == 11) {
+      PORTD &= ~STEP1_MASK;
+      stepPulseHigh2 = true;
+    } else {
+      PORTB &= ~STEP2_MASK;
+      stepPulseHigh2 = false;
+      TCCR1A |= (1 << COM1A0);
+    }
     return;
   }
 
