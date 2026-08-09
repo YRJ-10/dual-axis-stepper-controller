@@ -98,6 +98,15 @@
             <button id="sendSequenceButton" type="button" disabled style="background: var(--accent); border: none; color: #fff; padding: 6px 14px; border-radius: 4px; font-weight: bold; cursor: pointer;">Kirim & Mainkan</button>
           </div>
         </div>
+        <div class="preset-controls" style="display: flex; gap: 8px; margin-bottom: 12px; align-items: center; font-size: 13px;">
+          <select id="presetSelect" style="flex: 1; padding: 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--base); color: var(--ink);">
+            <option value="">-- Pilih Preset --</option>
+          </select>
+          <button id="loadPresetButton" type="button" style="background: #17a2b8; border: 1px solid #117a8b; color: #ffffff; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-weight: bold;">Terapkan</button>
+          <div style="width: 1px; height: 20px; background: var(--line); margin: 0 4px;"></div>
+          <input type="text" id="presetNameInput" placeholder="Nama Preset Baru" style="flex: 1; padding: 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--base); color: var(--ink);">
+          <button id="savePresetButton" type="button" style="background: #28a745; border: 1px solid #1e7e34; color: #ffffff; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-weight: bold;">Simpan Preset</button>
+        </div>
         <div class="table-wrap" style="max-height: 250px; overflow-y: auto; border: 1px solid var(--line); border-radius: 4px;">
           <table id="sequenceTable" style="width: 100%; text-align: center; border-collapse: collapse; background: var(--panel);">
             <thead style="position: sticky; top: 0; background: var(--line); color: var(--ink);">

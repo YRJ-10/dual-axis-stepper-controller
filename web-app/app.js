@@ -26,8 +26,29 @@ const defaultModes = [
 
 // Custom Sequence state
 let currentSequence = [
-  { s1: 1000, s2: 2000, sp: 50, m2: 2, d1: 1, d2: 1 }
+  { s1: 1000, s2: 1000, sp: 50, m2: 2, d1: 1, d2: 1 }
 ];
+
+const PRESET_STORAGE_KEY = "dualAxisChoreographyPresets_v1";
+let savedPresets = {};
+
+try {
+  const data = localStorage.getItem(PRESET_STORAGE_KEY);
+  if (data) savedPresets = JSON.parse(data);
+} catch (e) {}
+
+function updatePresetDropdown() {
+  const select = document.getElementById("presetSelect");
+  if (!select) return;
+  select.innerHTML = '<option value="">-- Pilih Preset --</option>';
+  for (const name in savedPresets) {
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = name;
+    select.appendChild(opt);
+  }
+}
+updatePresetDropdown();
 
 const connectButton = document.querySelector("#connectButton");
 const disconnectButton = document.querySelector("#disconnectButton");
@@ -249,6 +270,9 @@ function buildUi() {
   modeButtonGroup.append(independentGroup, coupledGroup);
 
   for (let mode = 0; mode < MODE_COUNT; mode++) {
+    if (mode === 11) {
+      continue;
+    }
     const isCoupled = mode >= 6;
     const modeButton = document.createElement("button");
     modeButton.type = "button";
@@ -1021,7 +1045,9 @@ function renderSequenceTable() {
 }
 
 window.updateSeq = function(index, field, value) {
-  currentSequence[index][field] = parseInt(value, 10);
+  let val = parseInt(value, 10);
+  if (isNaN(val)) val = 1;
+  currentSequence[index][field] = val;
 };
 
 window.deleteSeq = function(index) {
@@ -1037,13 +1063,45 @@ if (addSeqRowButton) {
     }
     // Copy the last step as a template, or create default
     if (currentSequence.length > 0) {
-      currentSequence.push({ ...currentSequence[currentSequence.length - 1] });
+      const lastStep = currentSequence[currentSequence.length - 1];
+      currentSequence.push({ ...lastStep });
     } else {
-      currentSequence.push({ s1: 1000, s2: 1000, sp: 50, m2: 2, d1: 1, d2: 1 });
+      currentSequence.push({
+      s1: 1000,
+      s2: 1000,
+      sp: 50,
+      m2: 2,
+      d1: 1,
+      d2: 1
+    });
     }
     renderSequenceTable();
   });
 }
+
+document.getElementById("savePresetButton")?.addEventListener("click", () => {
+  const name = document.getElementById("presetNameInput").value.trim();
+  if (!name) {
+    setCommandStatus("Nama preset tidak boleh kosong", "error");
+    return;
+  }
+  savedPresets[name] = currentSequence.map(s => ({...s}));
+  localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(savedPresets));
+  updatePresetDropdown();
+  document.getElementById("presetSelect").value = name;
+  setCommandStatus(`Preset '${name}' tersimpan!`, "ok");
+});
+
+document.getElementById("loadPresetButton")?.addEventListener("click", () => {
+  const name = document.getElementById("presetSelect").value;
+  if (!name || !savedPresets[name]) {
+    setCommandStatus("Pilih preset dari daftar", "error");
+    return;
+  }
+  currentSequence = savedPresets[name].map(s => ({...s}));
+  renderSequenceTable();
+  setCommandStatus(`Preset '${name}' diterapkan`, "ok");
+});
 
 if (sendSequenceButton) {
   sendSequenceButton.addEventListener("click", async () => {
@@ -1059,7 +1117,14 @@ if (sendSequenceButton) {
     sendCommand("SEQ_CLEAR");
     for (const step of currentSequence) {
       await new Promise(r => setTimeout(r, 50));
-      sendCommand(`SEQ_ADD ${step.s1} ${step.s2} ${step.sp} ${step.m2} ${step.d1} ${step.d2}`);
+      // PENGAMAN MUTLAK: Paksa angka kosong/0 menjadi minimal 1 agar Arduino tidak crash (0-step loop)
+      const s1 = Math.max(1, parseInt(step.s1) || 1000);
+      const s2 = Math.max(1, parseInt(step.s2) || 1000);
+      const sp = Math.max(1, parseInt(step.sp) || 50);
+      const m2 = Math.max(1, parseInt(step.m2) || 1);
+      const d1 = parseInt(step.d1) || 0;
+      const d2 = parseInt(step.d2) || 0;
+      sendCommand(`SEQ_ADD ${s1} ${s2} ${sp} ${m2} ${d1} ${d2}`);
     }
     
     await new Promise(r => setTimeout(r, 100));
