@@ -169,9 +169,11 @@ volatile bool directionChangePending2 = false;
 volatile bool motor2CoupledToMotor1 = false;
 volatile bool isJoggingMotor2 = false;
 volatile long absolutePosition1 = 0;
+volatile long absolutePosition2 = 0;
 volatile bool isJoggingMotor1 = false;
 volatile bool isHoming = false;
-volatile bool homingComplete = false;
+volatile bool homingMotor1Done = false;
+volatile bool homingMotor2Done = false;
 int pendingMode = 0;
 
 SequenceStep customSequence[MAX_SEQ_STEPS];
@@ -406,15 +408,17 @@ void updateMotionTargets() {
   }
   lastMotionTargetUs = now;
 
-  if (isJoggingMotor2 || isJoggingMotor1 || isHoming) {
+  if (isJoggingMotor2 || isJoggingMotor1) {
     return;
   }
-  if (homingComplete) {
-    homingComplete = false;
-    mode = pendingMode;
-    applyModeConfig(mode, true);
-    sendMode(mode);
-    sendActiveMode();
+  if (isHoming) {
+    if (homingMotor1Done && homingMotor2Done) {
+      isHoming = false;
+      mode = pendingMode;
+      applyModeConfig(mode, true);
+      sendMode(mode);
+      sendActiveMode();
+    }
     return;
   }
 
@@ -531,7 +535,10 @@ void stopMotionImmediately() {
     absolutePosition1 = 0;
     isJoggingMotor1 = false;
   }
-  isJoggingMotor2 = false;
+  if (isJoggingMotor2) {
+    absolutePosition2 = 0;
+    isJoggingMotor2 = false;
+  }
   isHoming = false;
   baseSpeed = 0;
   targetStepHz1 = 0;
@@ -625,20 +632,32 @@ void processCommand(char *line) {
       Serial.println(F("ERR mode"));
       return;
     }
-    if (absolutePosition1 != 0) {
+    if (absolutePosition1 != 0 || absolutePosition2 != 0) {
       mode = 0;
       pendingMode = nextMode;
       isHoming = true;
-      homingComplete = false;
+      homingMotor1Done = (absolutePosition1 == 0);
+      homingMotor2Done = (absolutePosition2 == 0);
       noInterrupts();
-      dirState1 = (absolutePosition1 < 0);
-      if (dirState1) {
-        PORTD |= DIR1_MASK;
+      
+      if (!homingMotor1Done) {
+        dirState1 = (absolutePosition1 < 0);
+        if (dirState1) PORTD |= DIR1_MASK; else PORTD &= ~DIR1_MASK;
+        targetStepHz1 = 1000;
       } else {
-        PORTD &= ~DIR1_MASK;
+        targetStepHz1 = 0;
       }
-      disableMotor2StepOutput();
-      targetStepHz1 = 1000;
+      
+      if (!homingMotor2Done) {
+        dirState2 = (absolutePosition2 < 0);
+        if (dirState2) PORTB |= DIR2_MASK; else PORTB &= ~DIR2_MASK;
+        targetHalfPeriodTicks2 = halfPeriodTicksFromHz(1000);
+        TCCR1A |= (1 << COM1A0);
+      } else {
+        targetHalfPeriodTicks2 = 0;
+        disableMotor2StepOutput();
+      }
+
       interrupts();
       Serial.println(F("OK HOMING"));
       return;
@@ -1124,14 +1143,19 @@ ISR(TIMER2_COMPA_vect) {
         } else {
           absolutePosition1--;
         }
+      } else {
+        if (dirState2) {
+          absolutePosition2++;
+        } else {
+          absolutePosition2--;
+        }
       }
 
       if (isJoggingMotor1) {
         // do nothing, step indefinitely
       } else if (isHoming) {
         if (absolutePosition1 == 0) {
-          isHoming = false;
-          homingComplete = true;
+          homingMotor1Done = true;
           targetStepHz1 = 0;
         }
       } else if (stepCount1 >= activeSteps1) {
@@ -1230,7 +1254,19 @@ ISR(TIMER1_COMPA_vect) {
   }
 
   stepCount2++;
-  if (!isJoggingMotor2) {
+  if (mode != 11) {
+    if (dirState2) absolutePosition2++;
+    else absolutePosition2--;
+  }
+  
+  if (isJoggingMotor2) {
+    // do nothing
+  } else if (isHoming) {
+    if (absolutePosition2 == 0) {
+      homingMotor2Done = true;
+      targetHalfPeriodTicks2 = 0;
+    }
+  } else {
     if (stepCount2 >= activeSteps2) {
       if (mode == 11) {
         targetHalfPeriodTicks2 = 0;
