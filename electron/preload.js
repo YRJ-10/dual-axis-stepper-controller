@@ -18,5 +18,8 @@ contextBridge.exposeInMainWorld("electronControls", {
   updateOverlayState: (state) => ipcRenderer.send("overlay:update", state),
   onGlobalMouseGesture: (callback) => {
     ipcRenderer.on("global-mouse:gesture", (_event, gesture) => callback(gesture));
+  },
+  onOverlayAction: (callback) => {
+    ipcRenderer.on("overlay:action", (_event, data) => callback(data.action, data.payload));
   }
 });

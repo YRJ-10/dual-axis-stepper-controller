@@ -9,21 +9,35 @@
   <body class="offline">
     <main class="monitor" aria-label="Controller monitor">
       <header>
-        <span class="connection-dot" aria-hidden="true"></span>
-        <span id="connectionLabel">OFFLINE</span>
-      </header>
-      <section class="mode-control">
-        <span>MODE</span>
-        <div id="modeButtons" class="mode-buttons" role="group" aria-label="Pilih mode"></div>
-      </section>
-      <section class="readings">
-        <div>
-          <span>SPEED</span>
-          <strong id="speedValue">0</strong>
+        <div class="header-left">
+          <span class="connection-dot" aria-hidden="true"></span>
+          <span id="connectionLabel">OFFLINE</span>
         </div>
-        <div class="motion-state">
-          <span>STATUS</span>
-          <strong id="runState">STOP</strong>
+        <div class="header-right motion-state">
+          <span>SPD:</span><strong id="speedValue">0</strong>
+          <span style="margin-left:5px;">ST:</span><strong id="runState">STOP</strong>
+        </div>
+      </header>
+      
+      <section class="mode-control">
+        <div id="modeButtons" class="mode-buttons" role="group"></div>
+      </section>
+
+      <section class="action-bar">
+        <button id="btnPlayPreset" class="btn-action btn-play" title="Kirim & Mainkan Preset Mode 11">▶️ Mode 11</button>
+        <button id="btnStop" class="btn-action btn-stop" title="Berhenti (STOP)">⏹️ STOP</button>
+      </section>
+
+      <section class="jog-bar">
+        <div class="jog-row">
+          <span class="jog-label">M1</span>
+          <button id="btnJogM1Bwd" class="btn-jog" title="M1 Mundur">◀</button>
+          <button id="btnJogM1Fwd" class="btn-jog" title="M1 Maju">▶</button>
+        </div>
+        <div class="jog-row">
+          <span class="jog-label">M2</span>
+          <button id="btnJogM2Bwd" class="btn-jog" title="M2 Mundur">◀</button>
+          <button id="btnJogM2Fwd" class="btn-jog" title="M2 Maju">▶</button>
         </div>
       </section>
     </main>

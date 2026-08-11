@@ -248,7 +248,8 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      backgroundThrottling: false
     }
   });
 
@@ -320,7 +321,13 @@ function createOverlayWindow() {
     }
   });
   overlayWindow.setIgnoreMouseEvents(false);
-  overlayWindow.setAlwaysOnTop(true, "floating");
+  overlayWindow.setAlwaysOnTop(true, "screen-saver");
+  
+  setInterval(() => {
+    if (overlayWindow && !overlayWindow.isDestroyed() && overlayWindow.isVisible()) {
+      overlayWindow.setAlwaysOnTop(true, "screen-saver");
+    }
+  }, 2000);
   overlayWindow.loadFile(path.join(__dirname, "overlay.html"));
   overlayWindow.webContents.on("did-finish-load", () => {
     overlayWindow.webContents.send("overlay:state", overlayState);
@@ -450,6 +457,10 @@ ipcMain.handle("overlay:set-mode", async (_event, requestedMode) => {
 
   await queueSerialWrite(`MODE ${nextMode}\n`);
   return { mode: nextMode };
+});
+
+ipcMain.handle("overlay:action", (_event, action, payload) => {
+  sendToRenderer("overlay:action", { action, payload });
 });
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();

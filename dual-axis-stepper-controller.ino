@@ -626,6 +626,7 @@ void processCommand(char *line) {
       return;
     }
     if (absolutePosition1 != 0) {
+      mode = 0;
       pendingMode = nextMode;
       isHoming = true;
       homingComplete = false;
@@ -1117,10 +1118,12 @@ ISR(TIMER2_COMPA_vect) {
       if (mode == 11) PORTB |= STEP2_MASK; else PORTD |= STEP1_MASK;
       stepPulseHigh1 = true;
       stepCount1++;
-      if (dirState1) {
-        absolutePosition1++;
-      } else {
-        absolutePosition1--;
+      if (mode != 11) {
+        if (dirState1) {
+          absolutePosition1++;
+        } else {
+          absolutePosition1--;
+        }
       }
 
       if (isJoggingMotor1) {
@@ -1174,6 +1177,11 @@ ISR(TIMER1_COMPA_vect) {
     if (mode == 11) {
       PORTD |= STEP1_MASK;
       stepPulseHigh2 = false;
+      if (dirState1) {
+        absolutePosition1++;
+      } else {
+        absolutePosition1--;
+      }
     } else {
       stepPulseHigh2 = !stepPulseHigh2;
     }

@@ -1103,6 +1103,20 @@ document.getElementById("loadPresetButton")?.addEventListener("click", () => {
   setCommandStatus(`Preset '${name}' diterapkan`, "ok");
 });
 
+document.getElementById("deletePresetButton")?.addEventListener("click", () => {
+  const name = document.getElementById("presetSelect").value;
+  if (!name || !savedPresets[name]) {
+    setCommandStatus("Pilih preset yang ingin dihapus", "error");
+    return;
+  }
+  if (confirm(`Yakin ingin menghapus preset '${name}'?`)) {
+    delete savedPresets[name];
+    localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(savedPresets));
+    updatePresetDropdown();
+    setCommandStatus(`Preset '${name}' dihapus`, "ok");
+  }
+});
+
 if (sendSequenceButton) {
   sendSequenceButton.addEventListener("click", async () => {
     if (currentSequence.length === 0) {
@@ -1140,25 +1154,25 @@ renderSequenceTable(); // initial render
 jogLeftButton.addEventListener("mousedown", () => sendJog(0));
 jogLeftButton.addEventListener("touchstart", (e) => { e.preventDefault(); sendJog(0); });
 jogLeftButton.addEventListener("mouseup", () => requestStop());
-jogLeftButton.addEventListener("mouseleave", () => requestStop());
+jogLeftButton.addEventListener("mouseleave", (e) => { if (e.buttons === 1) requestStop(); });
 jogLeftButton.addEventListener("touchend", () => requestStop());
 
 jogRightButton.addEventListener("mousedown", () => sendJog(1));
 jogRightButton.addEventListener("touchstart", (e) => { e.preventDefault(); sendJog(1); });
 jogRightButton.addEventListener("mouseup", () => requestStop());
-jogRightButton.addEventListener("mouseleave", () => requestStop());
+jogRightButton.addEventListener("mouseleave", (e) => { if (e.buttons === 1) requestStop(); });
 jogRightButton.addEventListener("touchend", () => requestStop());
 
 jogMotor1Backward.addEventListener("mousedown", () => sendJog1(0));
 jogMotor1Backward.addEventListener("touchstart", (e) => { e.preventDefault(); sendJog1(0); });
 jogMotor1Backward.addEventListener("mouseup", () => requestStop());
-jogMotor1Backward.addEventListener("mouseleave", () => requestStop());
+jogMotor1Backward.addEventListener("mouseleave", (e) => { if (e.buttons === 1) requestStop(); });
 jogMotor1Backward.addEventListener("touchend", () => requestStop());
 
 jogMotor1Forward.addEventListener("mousedown", () => sendJog1(1));
 jogMotor1Forward.addEventListener("touchstart", (e) => { e.preventDefault(); sendJog1(1); });
 jogMotor1Forward.addEventListener("mouseup", () => requestStop());
-jogMotor1Forward.addEventListener("mouseleave", () => requestStop());
+jogMotor1Forward.addEventListener("mouseleave", (e) => { if (e.buttons === 1) requestStop(); });
 jogMotor1Forward.addEventListener("touchend", () => requestStop());
 
 clearLogButton.addEventListener("click", () => {
@@ -1226,6 +1240,20 @@ if (controlsBridge) {
     }
     if (gesture.type === "stop") {
       requestStop();
+    }
+  });
+}
+
+if (controlsBridge && typeof controlsBridge.onOverlayAction === "function") {
+  controlsBridge.onOverlayAction((action, payload) => {
+    if (action === "play-preset") {
+      if (sendSequenceButton) sendSequenceButton.click();
+    } else if (action === "stop") {
+      requestStop();
+    } else if (action === "jog-m1") {
+      sendJog1(payload.dir);
+    } else if (action === "jog-m2") {
+      sendJog(payload.dir);
     }
   });
 }
